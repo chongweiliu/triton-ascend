@@ -1,152 +1,145 @@
-# AddRmsNorm Operator Design
+# AddRmsNorm 算子设计文档
 
-## 1. Objective
+## 1. 设计目标
 
-Implement AddRmsNorm with Triton-Ascend for BF16 inference tensors on Ascend
-NPU. The design follows the source requirement:
+本实现面向 Ascend NPU 上的 BF16 推理张量，使用 Triton-Ascend 实现 AddRmsNorm
+算子。算子语义遵循需求定义：
 
 ```text
 z = x1 + x2
 yOut = z * rsqrt(mean(z * z, axis=-1, keepdims=True) + epsilon) * gamma
 ```
 
-Only `yOut` is produced. CANN API auxiliary outputs such as `xOut` and
-`rstdOut` are not part of this deliverable.
+本交付件只输出 `yOut`。CANN API 中可能存在的 `xOut`、`rstdOut` 等辅助输出不在
+本次交付范围内。
 
-## 2. Interface
+## 2. 接口定义
 
 ```python
 add_rms_norm(x1: Tensor, x2: Tensor, gamma: Tensor, epsilon: float = 1e-6) -> Tensor
 ```
 
-Input constraints:
+输入约束：
 
-| Tensor | Dtype | Layout | Shape |
+| Tensor | 数据类型 | 布局 | 形状 |
 |---|---|---|---|
-| `x1` | BF16 | contiguous ND | `[B, S, H]` |
-| `x2` | BF16 | contiguous ND | `[B, S, H]` |
-| `gamma` | BF16 | contiguous ND | `[B, S, H]` |
+| `x1` | BF16 | 连续 ND | `[B, S, H]` |
+| `x2` | BF16 | 连续 ND | `[B, S, H]` |
+| `gamma` | BF16 | 连续 ND | `[B, S, H]` |
 
-The output `yOut` is BF16 contiguous ND with the same shape.
+输出 `yOut` 为 BF16 连续 ND 张量，形状与输入一致。
 
-## 3. Shape Coverage
+## 3. 形状覆盖
 
-The source requirement lists 20 mainstream inference combinations:
+原始需求列出了 20 组主流推理组合：
 
 - `B in {1, 8, 16, 32, 64}`
 - `H in {3584, 4096, 5120, 8192}`
 
-The validation material expands those documented combinations across
-`S in {1, 8, 32, 128}`. The implementation itself does not hard-code the public
-case ids or public workload filenames. Its runtime acceptance guard is:
+验证材料在上述组合基础上扩展 `S in {1, 8, 32, 128}`。实现本身不硬编码公开
+case id，也不读取公开 workload 文件名。运行时接受条件为：
 
-- rank-3 contiguous BF16 NPU tensors
-- identical input shapes
-- positive `epsilon`
-- `block_h = next_power_of_2(H) <= 8192`
+- rank-3 连续 BF16 NPU 张量
+- 三个输入形状完全一致
+- `epsilon` 为正数
+- hidden 维基于 Triton-Ascend 能力边界选择不同实现路径
 
-## 4. Kernel Design
+## 4. Kernel 设计
 
-The logical tensor is flattened into `n_rows = B * S` independent rows, each
-with `H` elements. Each Triton program handles one row.
+逻辑张量被展平成 `n_rows = B * S` 个独立行，每行包含 `H` 个元素。每个 Triton
+program 处理一行或一行中的一个 hidden 分块。
 
-For `H <= 4096`, a single fused kernel:
+当 `H <= 4096` 时，使用单个融合 kernel：
 
-1. loads `x1`, `x2`, and `gamma`
-2. computes `z = x1 + x2` in FP32
-3. reduces `sum(z*z)` over the hidden dimension
-4. computes `rstd`
-5. writes `z * rstd * gamma` as BF16
+1. 加载 `x1`、`x2` 和 `gamma`
+2. 在 FP32 中计算 `z = x1 + x2`
+3. 沿 hidden 维归约 `sum(z*z)`
+4. 计算 `rstd`
+5. 将 `z * rstd * gamma` 以 BF16 写回
 
-For `4096 < H` and `next_power_of_2(H) <= 8192`, the implementation uses two
-Triton kernels:
+当 `4096 < H` 且 `next_power_of_2(H) <= 8192` 时，使用两个 Triton kernel：
 
-1. compute one FP32 `rstd` value per row
-2. reload `x1`, `x2`, and `gamma`, then write `yOut`
+1. 每行计算一个 FP32 `rstd`
+2. 重新加载 `x1`、`x2` 和 `gamma`，写出 `yOut`
 
-This split avoids the fused 8192-wide temporary footprint that can exceed
-Triton-Ascend/BiShengIR on-chip limits.
+该拆分避免了 8192 宽融合 kernel 中间临时量过大，降低 Triton-Ascend/BiShengIR
+片上资源压力。
 
-For wider hidden sizes where `next_power_of_2(H) > 8192`, the implementation
-uses a chunked same-backend path:
+当 `next_power_of_2(H) > 8192` 时，使用同后端分块路径：
 
-1. compute FP32 partial sums over 8192-element hidden chunks
-2. reduce chunk sums into one FP32 `rstd` value per row
-3. apply `rstd` to each chunk and write `yOut`
+1. 以 8192 个 hidden 元素为一块计算 FP32 partial sum
+2. 将每行的 chunk sum 归约为一个 FP32 `rstd`
+3. 对每个 chunk 应用 `rstd` 并写出 `yOut`
 
-This path was added after generalization audit cases around `H=8320` exposed
-the previous single-program hidden-size limit.
+该路径是在泛化审计暴露 `H=8320` 附近的单 program hidden-size 限制后加入的。
 
-## 5. Precision
+## 5. 精度设计
 
-The kernel accumulates in FP32 and stores BF16 output. The validation script
-checks the BF16 L1-style relative-error criterion:
+kernel 使用 FP32 累加，并以 BF16 存储输出。验证脚本采用 BF16 L1 风格的相对误差
+口径：
 
-- BF16 threshold: `2^-7 = 0.0078125`
-- pass condition: `MERE < threshold` and `MARE < 10 * threshold`
+- BF16 阈值：`2^-7 = 0.0078125`
+- 通过条件：`MERE < threshold` 且 `MARE < 10 * threshold`
 
-OpForge CANN-Bench evidence for `eval_20260612_155910` shows:
+OpForge CANN-Bench `eval_20260612_155910` 证据显示：
 
-- `80/80` public cases accuracy-passed
-- accuracy failed cases: `0`
-- total mismatch count: `0`
-- max MARE: `0.007812499609375021`
-- max diff: `0.015625`
+- `80/80` 公开用例精度通过
+- 精度失败用例数：`0`
+- 总 mismatch 数：`0`
+- 最大 MARE：`0.007812499609375021`
+- 最大 diff：`0.015625`
 
-## 6. No-Fallback Boundary
+## 6. 无 fallback 边界
 
-The measured AddRmsNorm function uses local Triton-Ascend JIT kernels only.
-The wrapper uses Python for validation, output/workspace allocation, and kernel
-launch metadata. It does not compute the operator in Python and does not call:
+被测 AddRmsNorm 函数只使用本地 Triton-Ascend JIT kernel。Python 封装仅负责元数据
+校验、输出和工作区分配、kernel launch 参数组织，不在 Python 中计算算子结果，也不调用：
 
-- task golden/reference code
-- PyTorch AddRmsNorm-equivalent math in the measured function
+- 任务 golden/reference 代码
+- 被测函数内的 PyTorch AddRmsNorm 等价计算
 - `torch_npu.npu_add_rms_norm`
 - CANN/vendor AddRmsNorm
 - CPU fallback
-- peer or other-backend solution code
+- peer 或其他后端解法代码
 
-## 7. Current Performance Evidence
+## 7. 当前性能证据
 
-Structured evidence is copied in `OPFORGE_EVIDENCE.json`.
+结构化证据已复制到 `OPFORGE_EVIDENCE.json`。
 
-Current OpForge public result:
+当前 OpForge 公开评测结果：
 
-| Metric | Value |
+| 指标 | 数值 |
 |---|---:|
-| Run id | `eval_20260612_155910` |
-| Public cases | `80` |
-| Correct | `80` |
-| Failed | `0` |
-| Overall calibrated geomean speedup | `8.269904x` |
-| Minimum speedup | `0.485075x` |
-| Status | `PERF_REGRESSION` |
+| 运行编号 | `eval_20260612_155910` |
+| 公开用例数 | `80` |
+| 正确用例数 | `80` |
+| 失败用例数 | `0` |
+| 整体校准 geomean speedup | `8.269904x` |
+| 最小 speedup | `0.485075x` |
+| 状态 | `PERF_REGRESSION` |
 
-Manual generalization audit:
+手动泛化审计：
 
-| Metric | Value |
+| 指标 | 数值 |
 |---|---:|
-| Audit run id | `manual_generalization_audit_40_fixed_20260612_155512` |
-| Audit cases | 40 |
-| Failed | 0 |
-| Status | passed |
+| 审计运行编号 | `manual_generalization_audit_40_fixed_20260612_155512` |
+| 审计用例数 | 40 |
+| 失败用例数 | 0 |
+| 状态 | passed |
 
-Baseline provenance must be stated with the result:
+性能结果必须同时说明基线来源：
 
-| Baseline source | Cases | Geomean speedup |
+| 基线来源 | 用例数 | Geomean speedup |
 |---|---:|---:|
-| `torch_npu.npu_add_rms_norm` task baseline | 21 | `3.356045x` |
-| PyTorch semantic fallback baseline | 59 | `11.400119x` |
+| `torch_npu.npu_add_rms_norm` 任务 NPU 基线 | 21 | `3.356045x` |
+| PyTorch 语义 fallback 基线 | 59 | `11.400119x` |
 
-The public result proves correctness and shows strong calibrated aggregate
-speedup, but it should not be phrased as 80/80 cases being faster than CANN
-AddRmsNorm because 59 baselines were PyTorch fallback baselines.
+公开结果证明了 80 个用例的正确性，并展示了较高的整体校准加速比；但不能表述为
+“80/80 用例均快于 CANN AddRmsNorm”，因为其中 59 个用例的基线来源是 PyTorch
+语义 fallback。
 
-## 8. Risks And Next Work
+## 8. 风险与后续工作
 
-- Re-run validation in the final HiDevLab/Triton-Ascend environment and attach
-  the raw logs/screenshots required by the review process.
-- Improve small-shape performance; the current OpForge status is
-  `PERF_REGRESSION` because several cases are below the performance threshold.
-- Continue optimizing the small-shape path; cases below 1x are the current
-  blocker for a clean `PASSED` public status.
+- 在最终 HiDevLab/Triton-Ascend 环境中重新运行验证，并按评审流程补充原始日志和截图。
+- 继续优化小尺寸性能。当前 OpForge 状态为 `PERF_REGRESSION`，原因是部分小尺寸用例
+  低于性能阈值。
+- 当前 clean `PASSED` 状态的主要阻塞点是低于 1x 的小尺寸用例。

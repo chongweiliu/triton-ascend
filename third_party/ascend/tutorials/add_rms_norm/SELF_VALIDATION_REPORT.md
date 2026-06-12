@@ -1,143 +1,136 @@
-# AddRmsNorm Self-Validation Report
+# AddRmsNorm 自验证报告
 
-## 1. Environment
+## 1. 环境信息
 
-Evidence source: OpForge CANN-Bench evaluation on the local Ascend NPU
-workspace.
+证据来源为本地 Ascend NPU 工作区中的 OpForge CANN-Bench 评测结果。
 
-| Item | Value |
+| 项目 | 数值 |
 |---|---|
-| Run id | `eval_20260612_155910` |
-| Backend | Triton-Ascend |
-| Chip | Ascend910_9382 |
+| 运行编号 | `eval_20260612_155910` |
+| 后端 | Triton-Ascend |
+| 芯片 | Ascend910_9382 |
 | CANN | 9.0.0 |
 | Driver | 25.5.2 |
 | Python | 3.11.14 |
 | PyTorch | 2.10.0+cpu |
 | torch_npu | 2.10.0 |
-| Assigned physical NPU | 7 |
+| 分配物理 NPU | 7 |
 
-Primary local artifacts:
+主要本地证据文件：
 
 - `/mnt/model/lcw/SLAI-Ascend-OpForge/runs/CANNBench_Custom_add_rms_norm/agents/triton-ascend/results/eval_records/eval_20260612_155910/summary.json`
 - `/mnt/model/lcw/SLAI-Ascend-OpForge/runs/CANNBench_Custom_add_rms_norm/agents/triton-ascend/results/eval_records/eval_20260612_155910/traces.jsonl`
 - `/mnt/model/lcw/SLAI-Ascend-OpForge/runs/CANNBench_Custom_add_rms_norm/agents/triton-ascend/results/cann_bench_reports/eval_20260612_155910.md`
 - `/mnt/model/lcw/SLAI-Ascend-OpForge/runs/CANNBench_Custom_add_rms_norm/agents/triton-ascend/results/eval_records/manual_generalization_audit_40_fixed_20260612_155512/generalization_audit.json`
 
-## 2. Test Scope
+## 2. 测试范围
 
-The public validation set contains 80 cases:
+公开验证集包含 80 个用例：
 
 - `B in {1, 8, 16, 32, 64}`
 - `S in {1, 8, 32, 128}`
 - `H in {3584, 4096, 5120, 8192}`
-- dtype: BF16
-- input value ranges:
-  - `x1`: `[-1.0, 1.0]`
-  - `x2`: `[-1.0, 1.0]`
-  - `gamma`: `[0.5, 1.5]`
+- 数据类型：BF16
+- 输入取值范围：
+  - `x1`：`[-1.0, 1.0]`
+  - `x2`：`[-1.0, 1.0]`
+  - `gamma`：`[0.5, 1.5]`
 - `epsilon = 1e-6`
 
-## 3. Accuracy Result
+## 3. 精度结果
 
-BF16 L1-style threshold in the CANN-Bench checker:
+CANN-Bench checker 中的 BF16 L1 风格阈值：
 
-- threshold: `2^-7 = 0.0078125`
-- normal-value criterion: `MERE < threshold` and `MARE < 10 * threshold`
-- small-value/cancellation locations use the checker ErrorCount rules
+- 阈值：`2^-7 = 0.0078125`
+- 普通数值位置判定：`MERE < threshold` 且 `MARE < 10 * threshold`
+- 小值或抵消位置使用 checker 的 ErrorCount 规则
 
-Observed public result:
+观测到的公开评测结果：
 
-| Metric | Value |
+| 指标 | 数值 |
 |---|---:|
-| Public cases | 80 |
-| Accuracy passed | 80 |
-| Accuracy failed | 0 |
-| Total mismatch count | 0 |
-| Max MARE | 0.007812499609375021 |
-| Max diff | 0.015625 |
+| 公开用例数 | 80 |
+| 精度通过用例数 | 80 |
+| 精度失败用例数 | 0 |
+| 总 mismatch 数 | 0 |
+| 最大 MARE | 0.007812499609375021 |
+| 最大 diff | 0.015625 |
 
-Conclusion: the OpForge public CANN-Bench run satisfies the current BF16
-accuracy checker on all 80 public cases.
+结论：当前 OpForge 公开 CANN-Bench 运行在 80 个公开用例上均满足 BF16 精度检查。
 
-## 4. Performance Result
+## 4. 性能结果
 
-Overall calibrated public result:
+整体公开校准结果：
 
-| Metric | Value |
+| 指标 | 数值 |
 |---|---:|
-| Correct cases | 80 |
-| Failed cases | 0 |
-| Overall calibrated geomean speedup | 8.269904x |
-| Mean latency | 56.786125 us |
-| Median latency | 15.550000 us |
-| P95 latency | 225.166000 us |
-| Min speedup | 0.485075x |
+| 正确用例数 | 80 |
+| 失败用例数 | 0 |
+| 整体校准 geomean speedup | 8.269904x |
+| 平均耗时 | 56.786125 us |
+| 中位耗时 | 15.550000 us |
+| P95 耗时 | 225.166000 us |
+| 最小 speedup | 0.485075x |
 | Score | 102.290329 |
-| Status | `PERF_REGRESSION` |
+| 状态 | `PERF_REGRESSION` |
 
-Baseline source split:
+按基线来源拆分：
 
-| Baseline source | Cases | Geomean speedup | Mean speedup | Min speedup | Max speedup |
+| 基线来源 | 用例数 | Geomean speedup | 平均 speedup | 最小 speedup | 最大 speedup |
 |---|---:|---:|---:|---:|---:|
-| `torch_npu.npu_add_rms_norm` task baseline | 21 | 3.356045x | 5.218323x | 0.485075x | 21.716639x |
-| PyTorch semantic fallback baseline | 59 | 11.400119x | 17.899288x | 1.870117x | 63.325991x |
+| `torch_npu.npu_add_rms_norm` 任务 NPU 基线 | 21 | 3.356045x | 5.218323x | 0.485075x | 21.716639x |
+| PyTorch 语义 fallback 基线 | 59 | 11.400119x | 17.899288x | 1.870117x | 63.325991x |
 
-Important: only the 21 `task_npu_baseline` cases are directly calibrated
-against the public `torch_npu.npu_add_rms_norm` helper. The remaining 59 cases
-used PyTorch semantic fallback baseline because the public NPU baseline did not
-validate numerically for those cases.
+需要注意：只有 21 个 `task_npu_baseline` 用例是直接对齐公开
+`torch_npu.npu_add_rms_norm` helper 的校准结果。其余 59 个用例使用 PyTorch 语义
+fallback 基线，因为公开 NPU baseline 在这些用例上未能通过数值校验。
 
-## 5. No-Fallback Review
+## 5. 无 fallback 检查
 
-The deliverable implementation:
+本交付实现：
 
-- uses `@triton.jit` kernels for the measured path
-- validates metadata in Python
-- allocates output and FP32 `rstd` workspace as NPU tensors
-- does not call `torch_npu.npu_add_rms_norm`
-- does not call CANN/vendor AddRmsNorm
-- does not use CPU fallback, task golden code, peer solution code, or workload
-  answer data in the measured path
+- 被测路径使用 `@triton.jit` kernel
+- Python 侧只进行元数据校验
+- 输出张量和 FP32 `rstd` 工作区均分配在 NPU 上
+- 不调用 `torch_npu.npu_add_rms_norm`
+- 不调用 CANN/vendor AddRmsNorm
+- 不使用 CPU fallback、任务 golden 代码、peer 解法代码或 workload 答案数据
 
-The dispatch guard is implementation-capability based:
+分发 guard 基于实现能力边界：
 
-- `H <= 4096`: one fused Triton kernel
-- `4096 < H` and `next_power_of_2(H) <= 8192`: two-kernel local Triton path
-- wider `H`: chunked same-backend partial-sum/reduce/apply path using
-  8192-element hidden chunks
+- `H <= 4096`：单个融合 Triton kernel
+- `4096 < H` 且 `next_power_of_2(H) <= 8192`：两个 Triton kernel 的本地路径
+- 更宽 `H`：使用 8192 hidden 元素分块的同后端 partial-sum/reduce/apply 路径
 
-The code in this deliverable does not hard-code public case ids or public
-workload filenames.
+本交付代码不硬编码公开 case id，也不硬编码公开 workload 文件名。
 
-## 6. Generalization Audit
+## 6. 泛化审计
 
-Manual OpForge audit result:
+手动 OpForge 审计结果：
 
-| Metric | Value |
+| 指标 | 数值 |
 |---|---:|
-| Audit run id | `manual_generalization_audit_40_fixed_20260612_155512` |
-| Cases | 40 |
-| Failed | 0 |
-| Status | passed |
+| 审计运行编号 | `manual_generalization_audit_40_fixed_20260612_155512` |
+| 用例数 | 40 |
+| 失败用例数 | 0 |
+| 状态 | passed |
 
-## 7. Reproduction Command
+## 7. 复现命令
 
-Run from `third_party/ascend/tutorials/add_rms_norm`:
+在 `third_party/ascend/tutorials/add_rms_norm` 目录执行：
 
 ```bash
 python3 validate_add_rms_norm.py --public --generalization
 ```
 
-Optional smoke benchmark:
+可选的冒烟性能命令：
 
 ```bash
 python3 validate_add_rms_norm.py --public --benchmark --warmup 3 --repeat 5
 ```
 
-## 8. Current Limitations
+## 8. 当前限制
 
-- The current OpForge aggregate status is `PERF_REGRESSION`, not `PASSED`,
-  because the minimum speedup is below 1.0 on some small cases.
-- A final formal submission should attach fresh HiDevLab logs/screenshots and
-  performance data generated from this deliverable directory.
+- 当前 OpForge 聚合状态为 `PERF_REGRESSION`，不是 `PASSED`，原因是部分小尺寸用例
+  最小 speedup 低于 1.0。
+- 正式提交时建议补充从交付目录直接运行得到的 HiDevLab 日志、截图和性能数据截图。
