@@ -1,0 +1,89 @@
+date=2026-06-12 19:23:33 CST
+ASCEND_RT_VISIBLE_DEVICES=7
+ASCEND_VISIBLE_DEVICES=7
+ASCEND_DEVICE_ID=0
+command=/mnt/model/lcw/SLAI-Ascend-OpForge/.venv/bin/python3 validate_add_rms_norm.py --public --benchmark --warmup 3 --repeat 5
+/mnt/model/lcw/triton-ascend/third_party/ascend/tutorials/add_rms_norm/add_rms_norm.py:220: UserWarning: Cannot create tensor with interal format while allow_internel_format=False, tensor will be created with base format. (Triggered internally at ../torch_npu/csrc/aten/common/TensorFactories.cpp:340.)
+  y = torch.empty_like(x1)
+[PASS] 001/080 public shape=(1, 1, 3584) MERE=1.722e-06 MARE=6.173e-03 max_diff=3.906e-03 wall_clock_latency=103.987 us
+[PASS] 002/080 public shape=(1, 1, 4096) MERE=0.000e+00 MARE=0.000e+00 max_diff=0.000e+00 wall_clock_latency=86.802 us
+[PASS] 003/080 public shape=(1, 1, 5120) MERE=0.000e+00 MARE=0.000e+00 max_diff=0.000e+00 wall_clock_latency=148.388 us
+[PASS] 004/080 public shape=(1, 1, 8192) MERE=0.000e+00 MARE=0.000e+00 max_diff=0.000e+00 wall_clock_latency=136.396 us
+[PASS] 005/080 public shape=(8, 1, 3584) MERE=0.000e+00 MARE=0.000e+00 max_diff=0.000e+00 wall_clock_latency=81.372 us
+[PASS] 006/080 public shape=(8, 1, 4096) MERE=2.261e-07 MARE=7.407e-03 max_diff=3.906e-03 wall_clock_latency=77.373 us
+[PASS] 007/080 public shape=(8, 1, 5120) MERE=0.000e+00 MARE=0.000e+00 max_diff=0.000e+00 wall_clock_latency=159.605 us
+[PASS] 008/080 public shape=(8, 1, 8192) MERE=0.000e+00 MARE=0.000e+00 max_diff=0.000e+00 wall_clock_latency=160.063 us
+[PASS] 009/080 public shape=(16, 1, 3584) MERE=1.993e-07 MARE=5.714e-03 max_diff=3.906e-03 wall_clock_latency=83.028 us
+[PASS] 010/080 public shape=(16, 1, 4096) MERE=0.000e+00 MARE=0.000e+00 max_diff=0.000e+00 wall_clock_latency=85.206 us
+[PASS] 011/080 public shape=(16, 1, 5120) MERE=0.000e+00 MARE=0.000e+00 max_diff=0.000e+00 wall_clock_latency=149.099 us
+[PASS] 012/080 public shape=(16, 1, 8192) MERE=3.516e-08 MARE=4.608e-03 max_diff=3.906e-03 wall_clock_latency=198.239 us
+[PASS] 013/080 public shape=(32, 1, 3584) MERE=0.000e+00 MARE=0.000e+00 max_diff=0.000e+00 wall_clock_latency=107.627 us
+[PASS] 014/080 public shape=(32, 1, 4096) MERE=0.000e+00 MARE=0.000e+00 max_diff=0.000e+00 wall_clock_latency=107.001 us
+[PASS] 015/080 public shape=(32, 1, 5120) MERE=1.138e-07 MARE=6.993e-03 max_diff=3.906e-03 wall_clock_latency=192.970 us
+[PASS] 016/080 public shape=(32, 1, 8192) MERE=0.000e+00 MARE=0.000e+00 max_diff=0.000e+00 wall_clock_latency=207.943 us
+[PASS] 017/080 public shape=(64, 1, 3584) MERE=9.141e-08 MARE=7.634e-03 max_diff=3.906e-03 wall_clock_latency=96.178 us
+[PASS] 018/080 public shape=(64, 1, 4096) MERE=0.000e+00 MARE=0.000e+00 max_diff=0.000e+00 wall_clock_latency=103.179 us
+[PASS] 019/080 public shape=(64, 1, 5120) MERE=1.333e-08 MARE=4.367e-03 max_diff=7.812e-03 wall_clock_latency=170.969 us
+[PASS] 020/080 public shape=(64, 1, 8192) MERE=0.000e+00 MARE=0.000e+00 max_diff=0.000e+00 wall_clock_latency=219.780 us
+[PASS] 021/080 public shape=(1, 8, 3584) MERE=1.970e-07 MARE=5.650e-03 max_diff=3.906e-03 wall_clock_latency=79.053 us
+[PASS] 022/080 public shape=(1, 8, 4096) MERE=0.000e+00 MARE=0.000e+00 max_diff=0.000e+00 wall_clock_latency=81.466 us
+[PASS] 023/080 public shape=(1, 8, 5120) MERE=1.252e-07 MARE=5.128e-03 max_diff=9.766e-04 wall_clock_latency=147.488 us
+[PASS] 024/080 public shape=(1, 8, 8192) MERE=0.000e+00 MARE=0.000e+00 max_diff=0.000e+00 wall_clock_latency=148.748 us
+[PASS] 025/080 public shape=(8, 8, 3584) MERE=1.137e-07 MARE=6.711e-03 max_diff=1.562e-02 wall_clock_latency=89.886 us
+[PASS] 026/080 public shape=(8, 8, 4096) MERE=0.000e+00 MARE=0.000e+00 max_diff=0.000e+00 wall_clock_latency=79.605 us
+[PASS] 027/080 public shape=(8, 8, 5120) MERE=8.254e-08 MARE=7.692e-03 max_diff=1.562e-02 wall_clock_latency=157.317 us
+[PASS] 028/080 public shape=(8, 8, 8192) MERE=1.156e-08 MARE=6.061e-03 max_diff=7.812e-03 wall_clock_latency=149.933 us
+[PASS] 029/080 public shape=(16, 8, 3584) MERE=7.986e-08 MARE=6.579e-03 max_diff=7.812e-03 wall_clock_latency=81.343 us
+[PASS] 030/080 public shape=(16, 8, 4096) MERE=9.126e-09 MARE=4.785e-03 max_diff=7.812e-03 wall_clock_latency=116.813 us
+[PASS] 031/080 public shape=(16, 8, 5120) MERE=1.746e-08 MARE=6.098e-03 max_diff=3.906e-03 wall_clock_latency=192.822 us
+[PASS] 032/080 public shape=(16, 8, 8192) MERE=1.004e-08 MARE=5.263e-03 max_diff=7.812e-03 wall_clock_latency=211.419 us
+[PASS] 033/080 public shape=(32, 8, 3584) MERE=1.533e-08 MARE=7.353e-03 max_diff=1.562e-02 wall_clock_latency=95.428 us
+[PASS] 034/080 public shape=(32, 8, 4096) MERE=8.994e-09 MARE=5.025e-03 max_diff=3.906e-03 wall_clock_latency=80.714 us
+[PASS] 035/080 public shape=(32, 8, 5120) MERE=3.442e-08 MARE=6.849e-03 max_diff=1.562e-02 wall_clock_latency=158.513 us
+[PASS] 036/080 public shape=(32, 8, 8192) MERE=1.815e-08 MARE=7.194e-03 max_diff=7.812e-03 wall_clock_latency=239.192 us
+[PASS] 037/080 public shape=(64, 8, 3584) MERE=5.581e-08 MARE=7.576e-03 max_diff=1.562e-02 wall_clock_latency=109.543 us
+[PASS] 038/080 public shape=(64, 8, 4096) MERE=9.026e-09 MARE=5.495e-03 max_diff=3.906e-03 wall_clock_latency=92.526 us
+[PASS] 039/080 public shape=(64, 8, 5120) MERE=3.302e-08 MARE=7.576e-03 max_diff=7.812e-03 wall_clock_latency=167.581 us
+[PASS] 040/080 public shape=(64, 8, 8192) MERE=1.476e-08 MARE=6.711e-03 max_diff=1.562e-02 wall_clock_latency=222.414 us
+[PASS] 041/080 public shape=(1, 32, 3584) MERE=2.673e-07 MARE=6.452e-03 max_diff=7.812e-03 wall_clock_latency=80.642 us
+[PASS] 042/080 public shape=(1, 32, 4096) MERE=9.591e-08 MARE=6.757e-03 max_diff=7.812e-03 wall_clock_latency=143.512 us
+[PASS] 043/080 public shape=(1, 32, 5120) MERE=3.722e-08 MARE=6.098e-03 max_diff=7.812e-03 wall_clock_latency=157.105 us
+[PASS] 044/080 public shape=(1, 32, 8192) MERE=0.000e+00 MARE=0.000e+00 max_diff=0.000e+00 wall_clock_latency=244.973 us
+[PASS] 045/080 public shape=(8, 32, 3584) MERE=4.041e-08 MARE=6.369e-03 max_diff=3.906e-03 wall_clock_latency=119.433 us
+[PASS] 046/080 public shape=(8, 32, 4096) MERE=9.012e-09 MARE=5.025e-03 max_diff=3.906e-03 wall_clock_latency=103.998 us
+[PASS] 047/080 public shape=(8, 32, 5120) MERE=8.057e-09 MARE=5.405e-03 max_diff=1.953e-03 wall_clock_latency=206.441 us
+[PASS] 048/080 public shape=(8, 32, 8192) MERE=6.422e-09 MARE=4.878e-03 max_diff=3.906e-03 wall_clock_latency=198.453 us
+[PASS] 049/080 public shape=(16, 32, 3584) MERE=4.570e-08 MARE=7.752e-03 max_diff=1.562e-02 wall_clock_latency=133.476 us
+[PASS] 050/080 public shape=(16, 32, 4096) MERE=8.440e-09 MARE=7.634e-03 max_diff=7.812e-03 wall_clock_latency=124.967 us
+[PASS] 051/080 public shape=(16, 32, 5120) MERE=2.045e-08 MARE=6.494e-03 max_diff=3.906e-03 wall_clock_latency=184.848 us
+[PASS] 052/080 public shape=(16, 32, 8192) MERE=1.665e-08 MARE=7.463e-03 max_diff=7.812e-03 wall_clock_latency=186.104 us
+[PASS] 053/080 public shape=(32, 32, 3584) MERE=3.978e-08 MARE=7.812e-03 max_diff=7.812e-03 wall_clock_latency=87.068 us
+[PASS] 054/080 public shape=(32, 32, 4096) MERE=4.559e-09 MARE=6.135e-03 max_diff=3.906e-03 wall_clock_latency=116.105 us
+[PASS] 055/080 public shape=(32, 32, 5120) MERE=4.074e-08 MARE=7.752e-03 max_diff=1.562e-02 wall_clock_latency=145.458 us
+[PASS] 056/080 public shape=(32, 32, 8192) MERE=2.516e-08 MARE=7.576e-03 max_diff=1.562e-02 wall_clock_latency=176.650 us
+[PASS] 057/080 public shape=(64, 32, 3584) MERE=3.219e-08 MARE=7.576e-03 max_diff=1.562e-02 wall_clock_latency=94.644 us
+[PASS] 058/080 public shape=(64, 32, 4096) MERE=8.855e-09 MARE=7.519e-03 max_diff=1.562e-02 wall_clock_latency=90.800 us
+[PASS] 059/080 public shape=(64, 32, 5120) MERE=3.158e-08 MARE=7.812e-03 max_diff=1.562e-02 wall_clock_latency=186.682 us
+[PASS] 060/080 public shape=(64, 32, 8192) MERE=1.127e-08 MARE=7.634e-03 max_diff=7.812e-03 wall_clock_latency=203.853 us
+[PASS] 061/080 public shape=(1, 128, 3584) MERE=5.091e-08 MARE=6.944e-03 max_diff=7.812e-03 wall_clock_latency=81.658 us
+[PASS] 062/080 public shape=(1, 128, 4096) MERE=3.893e-08 MARE=6.803e-03 max_diff=7.812e-03 wall_clock_latency=88.278 us
+[PASS] 063/080 public shape=(1, 128, 5120) MERE=1.528e-08 MARE=5.208e-03 max_diff=7.812e-03 wall_clock_latency=182.576 us
+[PASS] 064/080 public shape=(1, 128, 8192) MERE=6.153e-09 MARE=6.452e-03 max_diff=1.562e-02 wall_clock_latency=189.756 us
+[PASS] 065/080 public shape=(8, 128, 3584) MERE=4.863e-08 MARE=7.752e-03 max_diff=1.562e-02 wall_clock_latency=84.042 us
+[PASS] 066/080 public shape=(8, 128, 4096) MERE=1.116e-08 MARE=5.181e-03 max_diff=3.906e-03 wall_clock_latency=211.285 us
+[PASS] 067/080 public shape=(8, 128, 5120) MERE=3.414e-08 MARE=7.519e-03 max_diff=1.562e-02 wall_clock_latency=250.015 us
+[PASS] 068/080 public shape=(8, 128, 8192) MERE=1.872e-08 MARE=7.246e-03 max_diff=1.562e-02 wall_clock_latency=168.257 us
+[PASS] 069/080 public shape=(16, 128, 3584) MERE=5.496e-08 MARE=7.576e-03 max_diff=1.562e-02 wall_clock_latency=105.136 us
+[PASS] 070/080 public shape=(16, 128, 4096) MERE=8.415e-09 MARE=7.812e-03 max_diff=1.562e-02 wall_clock_latency=129.030 us
+[PASS] 071/080 public shape=(16, 128, 5120) MERE=3.111e-08 MARE=7.692e-03 max_diff=1.562e-02 wall_clock_latency=230.582 us
+[PASS] 072/080 public shape=(16, 128, 8192) MERE=1.802e-08 MARE=7.752e-03 max_diff=1.562e-02 wall_clock_latency=223.714 us
+[PASS] 073/080 public shape=(32, 128, 3584) MERE=4.027e-08 MARE=7.752e-03 max_diff=1.562e-02 wall_clock_latency=143.730 us
+[PASS] 074/080 public shape=(32, 128, 4096) MERE=1.298e-08 MARE=6.757e-03 max_diff=7.812e-03 wall_clock_latency=107.659 us
+[PASS] 075/080 public shape=(32, 128, 5120) MERE=3.213e-08 MARE=7.812e-03 max_diff=1.562e-02 wall_clock_latency=282.368 us
+[PASS] 076/080 public shape=(32, 128, 8192) MERE=1.036e-08 MARE=7.812e-03 max_diff=1.562e-02 wall_clock_latency=278.938 us
+[PASS] 077/080 public shape=(64, 128, 3584) MERE=4.165e-08 MARE=7.812e-03 max_diff=1.562e-02 wall_clock_latency=356.024 us
+[PASS] 078/080 public shape=(64, 128, 4096) MERE=1.358e-08 MARE=7.634e-03 max_diff=1.562e-02 wall_clock_latency=248.303 us
+[PASS] 079/080 public shape=(64, 128, 5120) MERE=3.333e-08 MARE=7.812e-03 max_diff=1.562e-02 wall_clock_latency=653.697 us
+[PASS] 080/080 public shape=(64, 128, 8192) MERE=1.386e-08 MARE=7.812e-03 max_diff=1.562e-02 wall_clock_latency=701.290 us
+SUMMARY passed=80 threshold=0.00781250 max_mere=1.722e-06 max_mare=7.812e-03 max_diff=1.562e-02
+LATENCY wall_clock_us_geomean=144.901 us min=77.373 us max=701.290 us

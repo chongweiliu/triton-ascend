@@ -155,10 +155,14 @@ def main() -> None:
         max_diff = max(max_diff, metrics["max_diff"])
         if "latency_us" in metrics:
             latencies.append(metrics["latency_us"])
+        latency_text = ""
+        if "latency_us" in metrics:
+            latency_text = f" wall_clock_latency={metrics['latency_us']:.3f} us"
         print(
             f"[PASS] {index + 1:03d}/{len(selected):03d} "
             f"{case.kind} shape={case.shape} "
             f"MERE={metrics['mere']:.3e} MARE={metrics['mare']:.3e} max_diff={metrics['max_diff']:.3e}"
+            f"{latency_text}"
         )
 
     print(
@@ -167,7 +171,10 @@ def main() -> None:
     )
     if latencies:
         geo = math.exp(sum(math.log(max(v, 1e-9)) for v in latencies) / len(latencies))
-        print(f"LATENCY wall_clock_us_geomean={geo:.3f} min={min(latencies):.3f} max={max(latencies):.3f}")
+        print(
+            f"LATENCY wall_clock_us_geomean={geo:.3f} us "
+            f"min={min(latencies):.3f} us max={max(latencies):.3f} us"
+        )
 
 
 if __name__ == "__main__":
