@@ -115,13 +115,67 @@ def benchmark_once(func, args, warmup: int, repeat: int) -> float:
     return (time.perf_counter() - start) * 1_000_000 / repeat
 
 
-def run_case(case: Case, seed: int, device: str, benchmark: bool, warmup: int, repeat: int) -> dict[str, float]:
+def add_rms_norm_torch_npu(
+    x1: torch.Tensor,
+    x2: torch.Tensor,
+    gamma: torch.Tensor,
+    epsilon: float = 1e-6,
+) -> torch.Tensor:
+    op = getattr(torch_npu, "npu_add_rms_norm", None)
+    if not callable(op):
+        raise RuntimeError("torch_npu.npu_add_rms_norm is not available")
+    out = op(x1, x2, gamma, float(epsilon))
+    if isinstance(out, (tuple, list)):
+        if not out:
+            raise RuntimeError("torch_npu.npu_add_rms_norm returned no outputs")
+        return out[0]
+    return out
+
+
+def geomean(values: list[float]) -> float:
+    return math.exp(sum(math.log(max(v, 1e-9)) for v in values) / len(values))
+
+
+def format_latency_us(value: float | None) -> str:
+    if value is None:
+        return "N/A"
+    return f"{value:.3f} us"
+
+
+def format_speedup(value: float | None) -> str:
+    if value is None:
+        return "N/A"
+    return f"{value:.6f}x"
+
+
+def run_case(case: Case, seed: int, device: str, benchmark: bool, warmup: int, repeat: int) -> dict[str, object]:
     x1, x2, gamma = make_inputs(case.shape, seed, device)
     actual = add_rms_norm(x1, x2, gamma)
     expected = add_rms_norm_reference(x1, x2, gamma)
     metrics = assert_l1_bf16_accuracy(actual, expected)
     if benchmark:
-        metrics["latency_us"] = benchmark_once(add_rms_norm, (x1, x2, gamma), warmup, repeat)
+        triton_latency = benchmark_once(add_rms_norm, (x1, x2, gamma), warmup, repeat)
+        torch_latency = benchmark_once(add_rms_norm_reference, (x1, x2, gamma), warmup, repeat)
+        metrics["triton_latency_us"] = triton_latency
+        metrics["torch_latency_us"] = torch_latency
+        metrics["speedup_vs_torch"] = torch_latency / triton_latency
+        try:
+            torch_npu_actual = add_rms_norm_torch_npu(x1, x2, gamma)
+            try:
+                torch_npu_acc = assert_l1_bf16_accuracy(torch_npu_actual, expected)
+                metrics["torch_npu_accuracy"] = "PASS"
+                metrics["torch_npu_mare"] = torch_npu_acc["mare"]
+            except AssertionError:
+                metrics["torch_npu_accuracy"] = "FAIL"
+                metrics["torch_npu_mare"] = float("nan")
+            torch_npu_latency = benchmark_once(add_rms_norm_torch_npu, (x1, x2, gamma), warmup, repeat)
+            metrics["torch_npu_latency_us"] = torch_npu_latency
+            metrics["speedup_vs_torch_npu"] = torch_npu_latency / triton_latency
+        except Exception as exc:
+            metrics["torch_npu_accuracy"] = "ERROR"
+            metrics["torch_npu_error"] = f"{type(exc).__name__}: {str(exc).splitlines()[0][:120]}"
+            metrics["torch_npu_latency_us"] = None
+            metrics["speedup_vs_torch_npu"] = None
     return metrics
 
 
@@ -147,17 +201,45 @@ def main() -> None:
     max_mere = 0.0
     max_mare = 0.0
     max_diff = 0.0
-    latencies = []
+    triton_latencies = []
+    torch_latencies = []
+    speedups_vs_torch = []
+    torch_npu_latencies = []
+    speedups_vs_torch_npu = []
+    speedups_vs_valid_torch_npu = []
+    torch_npu_accuracy_counts = {"PASS": 0, "FAIL": 0, "ERROR": 0}
     for index, case in enumerate(selected):
         metrics = run_case(case, 20260612 + index, args.device, args.benchmark, args.warmup, args.repeat)
         max_mere = max(max_mere, metrics["mere"])
         max_mare = max(max_mare, metrics["mare"])
         max_diff = max(max_diff, metrics["max_diff"])
-        if "latency_us" in metrics:
-            latencies.append(metrics["latency_us"])
         latency_text = ""
-        if "latency_us" in metrics:
-            latency_text = f" wall_clock_latency={metrics['latency_us']:.3f} us"
+        if "triton_latency_us" in metrics:
+            triton_latency = metrics["triton_latency_us"]
+            torch_latency = metrics["torch_latency_us"]
+            speedup_vs_torch = metrics["speedup_vs_torch"]
+            triton_latencies.append(triton_latency)
+            torch_latencies.append(torch_latency)
+            speedups_vs_torch.append(speedup_vs_torch)
+            torch_npu_accuracy = str(metrics["torch_npu_accuracy"])
+            torch_npu_accuracy_counts[torch_npu_accuracy] += 1
+            torch_npu_latency = metrics["torch_npu_latency_us"]
+            speedup_vs_torch_npu = metrics["speedup_vs_torch_npu"]
+            if torch_npu_latency is not None:
+                torch_npu_latencies.append(torch_npu_latency)
+                speedups_vs_torch_npu.append(speedup_vs_torch_npu)
+                if torch_npu_accuracy == "PASS":
+                    speedups_vs_valid_torch_npu.append(speedup_vs_torch_npu)
+            latency_text = (
+                f" triton={format_latency_us(triton_latency)}"
+                f" torch={format_latency_us(torch_latency)}"
+                f" speedup_vs_torch={format_speedup(speedup_vs_torch)}"
+                f" torch_npu={format_latency_us(torch_npu_latency)}"
+                f" speedup_vs_torch_npu={format_speedup(speedup_vs_torch_npu)}"
+                f" torch_npu_accuracy={torch_npu_accuracy}"
+            )
+            if "torch_npu_error" in metrics:
+                latency_text += f" torch_npu_error={metrics['torch_npu_error']}"
         print(
             f"[PASS] {index + 1:03d}/{len(selected):03d} "
             f"{case.kind} shape={case.shape} "
@@ -169,11 +251,27 @@ def main() -> None:
         f"SUMMARY passed={len(selected)} threshold={2**-7:.8f} "
         f"max_mere={max_mere:.3e} max_mare={max_mare:.3e} max_diff={max_diff:.3e}"
     )
-    if latencies:
-        geo = math.exp(sum(math.log(max(v, 1e-9)) for v in latencies) / len(latencies))
+    if triton_latencies:
         print(
-            f"LATENCY wall_clock_us_geomean={geo:.3f} us "
-            f"min={min(latencies):.3f} us max={max(latencies):.3f} us"
+            f"LATENCY triton_geomean={geomean(triton_latencies):.3f} us "
+            f"triton_min={min(triton_latencies):.3f} us triton_max={max(triton_latencies):.3f} us "
+            f"torch_geomean={geomean(torch_latencies):.3f} us "
+            f"torch_min={min(torch_latencies):.3f} us torch_max={max(torch_latencies):.3f} us "
+            f"speedup_vs_torch_geomean={geomean(speedups_vs_torch):.6f}x"
+        )
+        valid_torch_npu_speedup = (
+            f"{geomean(speedups_vs_valid_torch_npu):.6f}x" if speedups_vs_valid_torch_npu else "N/A"
+        )
+        print(
+            f"LATENCY_TORCH_NPU timed_cases={len(torch_npu_latencies)} "
+            f"accuracy_pass={torch_npu_accuracy_counts['PASS']} "
+            f"accuracy_fail={torch_npu_accuracy_counts['FAIL']} "
+            f"accuracy_error={torch_npu_accuracy_counts['ERROR']} "
+            f"torch_npu_geomean={format_latency_us(geomean(torch_npu_latencies) if torch_npu_latencies else None)} "
+            f"torch_npu_min={format_latency_us(min(torch_npu_latencies) if torch_npu_latencies else None)} "
+            f"torch_npu_max={format_latency_us(max(torch_npu_latencies) if torch_npu_latencies else None)} "
+            f"speedup_vs_torch_npu_timed_geomean={format_speedup(geomean(speedups_vs_torch_npu) if speedups_vs_torch_npu else None)} "
+            f"speedup_vs_torch_npu_accuracy_pass_geomean={valid_torch_npu_speedup}"
         )
 
 

@@ -85,6 +85,26 @@ CANN-Bench checker 中的 BF16 L1 风格阈值：
 `torch_npu.npu_add_rms_norm` helper 的校准结果。其余 59 个用例使用 PyTorch 语义
 fallback 基线，因为公开 NPU baseline 在这些用例上未能通过数值校验。
 
+交付目录直接运行 `validate_add_rms_norm.py --public --benchmark --warmup 3 --repeat 5`
+得到的 wall-clock 冒烟对比结果如下，完整逐 case 数据见
+`AddRmsNorm算子自验证报告.xlsx` 的 `逐Case速度` 工作表和
+`logs/add_rms_norm_benchmark_20260612_193615.log`：
+
+| 对比项 | 数值 |
+|---|---:|
+| Triton-Ascend wall-clock geomean | 138.446 us |
+| PyTorch 语义实现 wall-clock geomean | 214.298 us |
+| Triton 相对 PyTorch 语义实现 geomean speedup | 1.547881x |
+| `torch_npu.npu_add_rms_norm` 可计时用例数 | 80 |
+| `torch_npu.npu_add_rms_norm` 精度通过用例数 | 58 |
+| `torch_npu.npu_add_rms_norm` 精度未通过用例数 | 22 |
+| `torch_npu.npu_add_rms_norm` wall-clock geomean | 285.929 us |
+| Triton 相对 `torch_npu` 全部可计时用例 geomean speedup | 2.065268x |
+| Triton 相对 `torch_npu` 精度通过用例 geomean speedup | 1.984192x |
+
+上述 wall-clock 冒烟数据用于自验证日志和截图证据，正式性能分数仍以上方
+OpForge CANN-Bench 设备侧计时结果为准。
+
 ### 4.1 80 个公开用例逐项明细
 
 下表由 `eval_20260612_155910/traces.jsonl` 和 `baseline/golden_baseline.json`

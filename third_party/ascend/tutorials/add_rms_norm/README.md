@@ -54,6 +54,10 @@ python3 validate_add_rms_norm.py --public --benchmark --warmup 3 --repeat 5
 
 验证脚本需要可用的 `torch`、`torch_npu`、Triton-Ascend 以及 Ascend NPU 环境。
 脚本会将 Triton-Ascend 输出与 PyTorch 语义参考结果进行 BF16 L1 精度口径对比。
+启用 `--benchmark` 时，脚本会逐 case 输出三路 wall-clock 冒烟性能数据：
+Triton-Ascend 交付实现、NPU 上的 PyTorch 语义公式实现，以及
+`torch_npu.npu_add_rms_norm`。`torch_npu` 路径会额外标注其输出相对 PyTorch
+语义参考的精度状态；精度未通过的用例不能作为正确基线结论，只作为实测对照数据。
 
 ## 实现说明
 
@@ -89,6 +93,10 @@ OpForge CANN-Bench 公开评测证据：
 fallback 基线，因为公开 NPU baseline 在这些用例上未能通过数值校验。因此不能表述为
 “80 个用例全部快于 CANN AddRmsNorm”，应使用 `SELF_VALIDATION_REPORT.md` 中的
 分组性能数据。
+
+交付目录内的 `logs/` 和 `AddRmsNorm算子自验证报告.xlsx` 还包含从本目录直接运行
+验证脚本得到的 80 case wall-clock 冒烟对比。该对比用于自验证截图/日志证据；
+正式性能结论仍以 OpForge CANN-Bench 设备侧计时和基线拆分为准。
 
 ## 已知限制
 
