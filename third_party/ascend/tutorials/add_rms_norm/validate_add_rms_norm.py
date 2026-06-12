@@ -1,17 +1,26 @@
 # Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
-"""Functional and smoke-performance validation for the AddRmsNorm tutorial."""
+"""CANN-Bench-style validation for the AddRmsNorm tutorial."""
 
 from __future__ import annotations
 
 import argparse
+import csv
+import hashlib
+import json
+import logging
 import math
+import os
+import shutil
+import tempfile
 import time
 from dataclasses import dataclass
+from pathlib import Path
+from typing import Callable
 
 import torch
 
 try:
-    import torch_npu  # noqa: F401
+    import torch_npu
 except Exception:  # pragma: no cover - depends on Ascend runtime.
     torch_npu = None
 
@@ -42,6 +51,17 @@ PUBLIC_BH_SHAPES = [
 ]
 
 PUBLIC_SEQUENCE_LENGTHS = [1, 8, 32, 128]
+BF16_THRESHOLD = 2**-7
+BF16_SMALL_VALUE_THRESHOLD = 2**-8
+BF16_SMALL_VALUE_ERROR = 2**-16
+BF16_CANCEL_BOUNDARY = 2**-3
+BF16_CANCEL_ZERO_THRESHOLD = 2**-3
+WARMUP_MATMUL_SHAPE = os.environ.get(
+    "CANN_BENCH_WARMUP_MATMUL_SHAPE", '"10240,10240;10240,10240"'
+)
+WARMUP_REDUCE_SHAPE = os.environ.get(
+    "CANN_BENCH_WARMUP_REDUCE_SHAPE", '"96,1024,1024;3"'
+)
 
 
 @dataclass(frozen=True)
@@ -54,6 +74,22 @@ class Case:
     @property
     def shape(self) -> tuple[int, int, int]:
         return (self.bsz, self.seq, self.hidden)
+
+
+@dataclass
+class ProfileResult:
+    latency_us: float | None
+    device_kernels: dict[str, float]
+    device_timeline: dict[str, object]
+    csv_path: str | None
+    trace_view_path: str | None
+    error: str | None = None
+    perf_metric_strategy: str = ""
+    measurement_scope: str = ""
+    elapsed_us_source: str = ""
+
+
+_WARMUP_TENSORS: tuple[torch.Tensor, torch.Tensor, torch.Tensor] | None = None
 
 
 def public_cases() -> list[Case]:
@@ -75,44 +111,32 @@ def generalization_cases() -> list[Case]:
     ]
 
 
-def make_inputs(shape: tuple[int, int, int], seed: int, device: str) -> tuple[torch.Tensor, ...]:
-    gen = torch.Generator(device="cpu")
-    gen.manual_seed(seed)
-    x1_cpu = torch.empty(shape, dtype=torch.float32).uniform_(-1.0, 1.0, generator=gen)
-    x2_cpu = torch.empty(shape, dtype=torch.float32).uniform_(-1.0, 1.0, generator=gen)
-    gamma_cpu = torch.empty(shape, dtype=torch.float32).uniform_(0.5, 1.5, generator=gen)
+def _cannbench_case_id(index: int) -> str:
+    return f"custom/add_rms_norm_{index}"
+
+
+def _cannbench_case_seed(index: int, eval_seed: int = 0) -> int:
+    digest = hashlib.sha256(_cannbench_case_id(index).encode("utf-8")).digest()
+    deterministic_hash = int.from_bytes(digest[:8], byteorder="big") % (2**31)
+    return (int(eval_seed) + deterministic_hash) % (2**31)
+
+
+def _gen_bf16_uniform(shape: tuple[int, int, int], min_val: float, max_val: float, gen: torch.Generator) -> torch.Tensor:
+    tensor_f64 = torch.rand(shape, dtype=torch.float64, generator=gen) * (max_val - min_val) + min_val
+    return tensor_f64.to(torch.bfloat16)
+
+
+def make_inputs(shape: tuple[int, int, int], case_index: int, device: str) -> tuple[torch.Tensor, ...]:
+    gen = torch.Generator()
+    gen.manual_seed(_cannbench_case_seed(case_index))
+    x1_cpu = _gen_bf16_uniform(shape, -1.0, 1.0, gen)
+    x2_cpu = _gen_bf16_uniform(shape, -1.0, 1.0, gen)
+    gamma_cpu = _gen_bf16_uniform(shape, 0.5, 1.5, gen)
     return (
-        x1_cpu.to(device=device, dtype=torch.bfloat16).contiguous(),
-        x2_cpu.to(device=device, dtype=torch.bfloat16).contiguous(),
-        gamma_cpu.to(device=device, dtype=torch.bfloat16).contiguous(),
+        x1_cpu.to(device=device).contiguous(),
+        x2_cpu.to(device=device).contiguous(),
+        gamma_cpu.to(device=device).contiguous(),
     )
-
-
-def assert_l1_bf16_accuracy(actual: torch.Tensor, expected: torch.Tensor) -> dict[str, float]:
-    actual64 = actual.cpu().to(torch.float64)
-    expected64 = expected.cpu().to(torch.bfloat16).to(torch.float64)
-    diff = torch.abs(actual64 - expected64)
-    rel = diff / (torch.abs(expected64) + 1e-7)
-    mere = float(rel.mean().item())
-    mare = float(rel.max().item())
-    max_diff = float(diff.max().item())
-    threshold = 2**-7
-    if not (mere < threshold and mare < 10 * threshold):
-        raise AssertionError(
-            f"BF16 L1 accuracy failed: MERE={mere:.6g}, MARE={mare:.6g}, max_diff={max_diff:.6g}"
-        )
-    return {"mere": mere, "mare": mare, "max_diff": max_diff}
-
-
-def benchmark_once(func, args, warmup: int, repeat: int) -> float:
-    for _ in range(warmup):
-        func(*args)
-    torch_npu.npu.synchronize()
-    start = time.perf_counter()
-    for _ in range(repeat):
-        func(*args)
-    torch_npu.npu.synchronize()
-    return (time.perf_counter() - start) * 1_000_000 / repeat
 
 
 def add_rms_norm_torch_npu(
@@ -132,6 +156,219 @@ def add_rms_norm_torch_npu(
     return out
 
 
+def add_rms_norm_cannbench_golden(
+    x1: torch.Tensor,
+    x2: torch.Tensor,
+    gamma: torch.Tensor,
+    epsilon: float = 1e-6,
+) -> torch.Tensor:
+    """Semantic golden matching the custom CANN-Bench golden.py implementation."""
+
+    z = x1.to(torch.float32) + x2.to(torch.float32)
+    variance = torch.mean(z * z, dim=-1, keepdim=True)
+    y = z * torch.rsqrt(variance + float(epsilon)) * gamma.to(torch.float32)
+    return y.to(dtype=x1.dtype)
+
+
+def cannbench_bf16_compare(
+    actual: torch.Tensor,
+    golden: torch.Tensor,
+    native_output: torch.Tensor | None = None,
+) -> dict[str, object]:
+    """Replicate the CANN-Bench BF16 relative-error acceptance path."""
+
+    if actual.device.type != "cpu":
+        actual = actual.cpu()
+    if golden.device.type != "cpu":
+        golden = golden.cpu()
+    if native_output is not None and native_output.device.type != "cpu":
+        native_output = native_output.cpu()
+    if actual.shape != golden.shape:
+        return {
+            "passed": False,
+            "threshold": BF16_THRESHOLD,
+            "mere": 0.0,
+            "mare": 0.0,
+            "max_diff": 0.0,
+            "mean_diff": 0.0,
+            "mismatch_count": int(actual.numel()),
+            "total_count": int(actual.numel()),
+            "error_msg": f"shape mismatch: actual={tuple(actual.shape)} golden={tuple(golden.shape)}",
+        }
+
+    target_dtype = actual.dtype
+    actual64 = actual.to(torch.float64)
+    golden_truncated = golden.to(target_dtype).to(torch.float64)
+
+    if torch.any(torch.isnan(actual64)) or torch.any(torch.isnan(golden_truncated)):
+        if not torch.all(torch.isnan(actual64) == torch.isnan(golden_truncated)):
+            return {
+                "passed": False,
+                "threshold": BF16_THRESHOLD,
+                "mere": 0.0,
+                "mare": 0.0,
+                "max_diff": 0.0,
+                "mean_diff": 0.0,
+                "mismatch_count": int(actual.numel()),
+                "total_count": int(actual.numel()),
+                "small_value_error_count": 0,
+                "small_value_cpu_error_count": 0,
+                "small_value_total_count": 0,
+                "cancel_error_count": 0,
+                "cancel_cpu_error_count": 0,
+                "cancel_total_count": 0,
+                "error_msg": "NaN position mismatch",
+            }
+
+    inf_match_mask = torch.zeros_like(actual64, dtype=torch.bool)
+    if torch.any(torch.isinf(actual64)) or torch.any(torch.isinf(golden_truncated)):
+        inf_out = torch.isinf(actual64)
+        inf_gold = torch.isinf(golden_truncated)
+        inf_mismatch = inf_out != inf_gold
+        if torch.any(inf_mismatch):
+            max_finite = float(torch.finfo(target_dtype).max)
+            if torch.any(inf_out & ~inf_gold):
+                mask = inf_out & ~inf_gold
+                actual64[mask] = torch.sign(actual64[mask]) * max_finite
+            if torch.any(inf_gold & ~inf_out):
+                mask = inf_gold & ~inf_out
+                golden_truncated[mask] = torch.sign(golden_truncated[mask]) * max_finite
+        both_inf = inf_out & inf_gold
+        if torch.any(both_inf):
+            if not torch.all(torch.sign(actual64[both_inf]) == torch.sign(golden_truncated[both_inf])):
+                return {
+                    "passed": False,
+                    "threshold": BF16_THRESHOLD,
+                    "mere": 0.0,
+                    "mare": 0.0,
+                    "max_diff": 0.0,
+                    "mean_diff": 0.0,
+                    "mismatch_count": int(both_inf.sum().item()),
+                    "total_count": int(actual.numel()),
+                    "small_value_error_count": 0,
+                    "small_value_cpu_error_count": 0,
+                    "small_value_total_count": 0,
+                    "cancel_error_count": 0,
+                    "cancel_cpu_error_count": 0,
+                    "cancel_total_count": 0,
+                    "error_msg": "Inf sign mismatch",
+                }
+            inf_match_mask[both_inf] = True
+
+    diff = torch.abs(actual64 - golden_truncated)
+    golden_abs = torch.abs(golden_truncated)
+    rel = diff / (golden_abs + 1e-7)
+    valid = ~(torch.isnan(rel) | torch.isinf(rel) | inf_match_mask)
+    total_count = int(actual.numel())
+    if valid.any().item():
+        valid_rel = rel[valid]
+        valid_diff = diff[valid]
+        mere = float(valid_rel.mean().item())
+        mare = float(valid_rel.max().item())
+        max_diff = float(valid_diff.max().item())
+        mean_diff = float(valid_diff.mean().item())
+    else:
+        mere = 0.0
+        mare = 0.0
+        max_diff = 0.0
+        mean_diff = 0.0
+
+    mare_threshold = 10 * BF16_THRESHOLD
+    if mere < BF16_THRESHOLD and mare < mare_threshold:
+        return {
+            "passed": True,
+            "threshold": BF16_THRESHOLD,
+            "mere": mere,
+            "mare": mare,
+            "max_diff": max_diff,
+            "mean_diff": mean_diff,
+            "mismatch_count": 0,
+            "total_count": total_count,
+            "small_value_error_count": 0,
+            "small_value_cpu_error_count": 0,
+            "small_value_total_count": 0,
+            "cancel_error_count": 0,
+            "cancel_cpu_error_count": 0,
+            "cancel_total_count": 0,
+            "error_msg": "",
+        }
+
+    mismatch_mask = (rel > mare_threshold) & valid
+    mismatch_count = int(mismatch_mask.sum().item())
+
+    small_value_mask = (golden_abs < BF16_SMALL_VALUE_THRESHOLD) & valid
+    small_value_total_count = int(small_value_mask.sum().item())
+    small_value_error_mask = small_value_mask & (diff > BF16_SMALL_VALUE_ERROR)
+    small_value_error_count = int(small_value_error_mask.sum().item())
+
+    native64 = (
+        native_output.to(torch.float64)
+        if native_output is not None
+        else golden.to(target_dtype).to(torch.float64)
+    )
+    cpu_diff = torch.abs(native64 - golden_truncated)
+    cpu_small_value_error_mask = small_value_mask & (cpu_diff > BF16_SMALL_VALUE_ERROR)
+    small_value_cpu_error_count = int(cpu_small_value_error_mask.sum().item())
+    if small_value_total_count > 0:
+        if small_value_cpu_error_count == 0:
+            small_value_passed = small_value_error_count == 0
+        else:
+            small_value_passed = (small_value_error_count / max(small_value_cpu_error_count, 1)) <= 2
+    else:
+        small_value_passed = True
+
+    actual_abs = torch.abs(actual64)
+    cancel_mask = (
+        (actual_abs < BF16_CANCEL_ZERO_THRESHOLD)
+        & (golden_abs < BF16_CANCEL_BOUNDARY)
+        & (golden_abs >= BF16_SMALL_VALUE_THRESHOLD)
+        & valid
+    )
+    cancel_total_count = int(cancel_mask.sum().item())
+    cancel_error_mask = cancel_mask & (rel > mare_threshold)
+    cancel_error_count = int(cancel_error_mask.sum().item())
+    cpu_relative_error = cpu_diff / (golden_abs + 1e-7)
+    cancel_cpu_error_mask = cancel_mask & (cpu_relative_error > mare_threshold)
+    cancel_cpu_error_count = int(cancel_cpu_error_mask.sum().item())
+    if cancel_total_count > 0:
+        if cancel_cpu_error_count == 0:
+            cancel_passed = cancel_error_count == 0
+        else:
+            cancel_passed = (cancel_error_count / max(cancel_cpu_error_count, 1)) <= 2
+    else:
+        cancel_passed = True
+
+    mismatch_in_normal = mismatch_mask & ~small_value_mask & ~cancel_mask
+    normal_mismatch_count = int(mismatch_in_normal.sum().item())
+    passed = bool(normal_mismatch_count == 0 and small_value_passed and cancel_passed)
+    if normal_mismatch_count > 0:
+        normal_mask = ~small_value_mask & ~cancel_mask & valid
+        normal_rel = rel[normal_mask]
+        display_mere = float(normal_rel.mean().item()) if normal_rel.numel() else 0.0
+        display_mare = float(normal_rel.max().item()) if normal_rel.numel() else 0.0
+    else:
+        display_mere = mere
+        display_mare = mare
+
+    return {
+        "passed": passed,
+        "threshold": BF16_THRESHOLD,
+        "mere": display_mere,
+        "mare": display_mare,
+        "max_diff": max_diff,
+        "mean_diff": mean_diff,
+        "mismatch_count": mismatch_count,
+        "total_count": total_count,
+        "small_value_error_count": small_value_error_count,
+        "small_value_cpu_error_count": small_value_cpu_error_count,
+        "small_value_total_count": small_value_total_count,
+        "cancel_error_count": cancel_error_count,
+        "cancel_cpu_error_count": cancel_cpu_error_count,
+        "cancel_total_count": cancel_total_count,
+        "error_msg": "" if passed else "MERE/MARE threshold exceeded",
+    }
+
+
 def geomean(values: list[float]) -> float:
     return math.exp(sum(math.log(max(v, 1e-9)) for v in values) / len(values))
 
@@ -148,35 +385,659 @@ def format_speedup(value: float | None) -> str:
     return f"{value:.6f}x"
 
 
-def run_case(case: Case, seed: int, device: str, benchmark: bool, warmup: int, repeat: int) -> dict[str, object]:
-    x1, x2, gamma = make_inputs(case.shape, seed, device)
-    actual = add_rms_norm(x1, x2, gamma)
-    expected = add_rms_norm_reference(x1, x2, gamma)
-    metrics = assert_l1_bf16_accuracy(actual, expected)
-    if benchmark:
-        triton_latency = benchmark_once(add_rms_norm, (x1, x2, gamma), warmup, repeat)
-        torch_latency = benchmark_once(add_rms_norm_reference, (x1, x2, gamma), warmup, repeat)
-        metrics["triton_latency_us"] = triton_latency
-        metrics["torch_latency_us"] = torch_latency
-        metrics["speedup_vs_torch"] = torch_latency / triton_latency
-        try:
-            torch_npu_actual = add_rms_norm_torch_npu(x1, x2, gamma)
+def _profiler_enum(enum_owner, enum_name: str, enum_type: str):
+    try:
+        return getattr(enum_owner, enum_name)
+    except AttributeError as exc:
+        available = ", ".join(name for name in dir(enum_owner) if not name.startswith("_"))
+        raise ValueError(f"unsupported profiler {enum_type}: {enum_name}; available: {available}") from exc
+
+
+def _profiler_export_types(export_type: str):
+    names = [part.strip() for part in str(export_type or "Text").split(",") if part.strip()]
+    if not names:
+        raise ValueError("profiler export type must not be empty")
+    return [_profiler_enum(torch_npu.profiler.ExportType, name, "export type") for name in names]
+
+
+def _experimental_config(profiler_level: str, profiler_aic_metrics: str, profiler_export_type: str):
+    return torch_npu.profiler._ExperimentalConfig(
+        export_type=_profiler_export_types(profiler_export_type),
+        profiler_level=_profiler_enum(torch_npu.profiler.ProfilerLevel, profiler_level, "level"),
+        aic_metrics=_profiler_enum(torch_npu.profiler.AiCMetrics, profiler_aic_metrics, "aic metrics"),
+    )
+
+
+def _prepare_warmup_tensors(device: str) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    global _WARMUP_TENSORS
+    if _WARMUP_TENSORS is None:
+        mm1 = torch.rand((10240, 10240), dtype=torch.float16).to(device)
+        mm2 = torch.rand((10240, 10240), dtype=torch.float16).to(device)
+        reduce_input = torch.rand((96, 1024, 1024), dtype=torch.float16).to(device)
+        _WARMUP_TENSORS = (mm1, mm2, reduce_input)
+    return _WARMUP_TENSORS
+
+
+def _boost_freq_and_clear_cache(device: str) -> None:
+    mm1, mm2, reduce_input = _prepare_warmup_tensors(device)
+    try:
+        torch.matmul(mm1, mm2)
+        torch_npu.npu.synchronize()
+        torch.max(reduce_input)
+        torch_npu.npu.synchronize()
+    except RuntimeError:
+        torch_npu.npu.synchronize()
+
+
+def _clear_cache(device: str) -> None:
+    _, _, reduce_input = _prepare_warmup_tensors(device)
+    try:
+        torch.max(reduce_input)
+        torch_npu.npu.synchronize()
+    except RuntimeError:
+        torch_npu.npu.synchronize()
+
+
+def _is_warmup_kernel(op_type: str, input_shapes: str) -> bool:
+    if not op_type or not input_shapes:
+        return False
+    if op_type == "MatMulV3" and WARMUP_MATMUL_SHAPE in input_shapes:
+        return True
+    if op_type == "ReduceMax" and WARMUP_REDUCE_SHAPE in input_shapes:
+        return True
+    return False
+
+
+def _step_sort_key(step_id: str) -> tuple[int, str]:
+    try:
+        return (int(step_id), step_id)
+    except (TypeError, ValueError):
+        return (10**9, str(step_id))
+
+
+def _median(values: list[float]) -> float:
+    if not values:
+        return 0.0
+    sorted_values = sorted(values)
+    n = len(sorted_values)
+    if n % 2:
+        return sorted_values[n // 2]
+    return (sorted_values[n // 2 - 1] + sorted_values[n // 2]) / 2
+
+
+def parse_kernel_details_csv(csv_path: Path) -> dict[str, object]:
+    """CANN-Bench KernelDetailsStrategy equivalent for kernel_details.csv."""
+
+    step_kernel_times: dict[str, dict[str, list[float]]] = {}
+    with csv_path.open("r", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            step_id = row.get("Step Id", "").strip()
+            if not step_id:
+                continue
             try:
-                torch_npu_acc = assert_l1_bf16_accuracy(torch_npu_actual, expected)
-                metrics["torch_npu_accuracy"] = "PASS"
-                metrics["torch_npu_mare"] = torch_npu_acc["mare"]
-            except AssertionError:
-                metrics["torch_npu_accuracy"] = "FAIL"
-                metrics["torch_npu_mare"] = float("nan")
-            torch_npu_latency = benchmark_once(add_rms_norm_torch_npu, (x1, x2, gamma), warmup, repeat)
-            metrics["torch_npu_latency_us"] = torch_npu_latency
-            metrics["speedup_vs_torch_npu"] = torch_npu_latency / triton_latency
-        except Exception as exc:
-            metrics["torch_npu_accuracy"] = "ERROR"
-            metrics["torch_npu_error"] = f"{type(exc).__name__}: {str(exc).splitlines()[0][:120]}"
-            metrics["torch_npu_latency_us"] = None
-            metrics["speedup_vs_torch_npu"] = None
-    return metrics
+                duration = float(row.get("Duration(us)", "0"))
+            except (TypeError, ValueError):
+                continue
+            if duration <= 0:
+                continue
+            op_type = row.get("Type", "")
+            input_shapes = row.get("Input Shapes", "")
+            name = row.get("Name", op_type)
+            if _is_warmup_kernel(op_type, input_shapes):
+                continue
+            step_kernel_times.setdefault(step_id, {}).setdefault(name, []).append(duration)
+
+    all_kernel_times: dict[str, list[float]] = {}
+    for kernels in step_kernel_times.values():
+        for name, times in kernels.items():
+            all_kernel_times.setdefault(name, []).append(sum(times))
+
+    device_kernels: dict[str, float] = {}
+    total_kernel_us = 0.0
+    for name, times in all_kernel_times.items():
+        median_time = _median(times)
+        device_kernels[name] = round(median_time, 2)
+        total_kernel_us += median_time
+
+    return {
+        "device_kernels": device_kernels,
+        "total_kernel_us": round(total_kernel_us, 2),
+        "step_count": len(step_kernel_times),
+    }
+
+
+def parse_baseline_active_window_csv(csv_path: Path) -> dict[str, object]:
+    """CANN-Bench custom baseline BaselineActiveWindowStrategy equivalent."""
+
+    step_kernel_times: dict[str, dict[str, list[float]]] = {}
+    step_windows: dict[str, dict[str, object]] = {}
+    ignored_blank_step_rows = 0
+
+    with csv_path.open("r", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        required_fields = {"Step Id", "Name", "Type", "Start Time(us)", "Duration(us)"}
+        missing = sorted(required_fields - set(reader.fieldnames or []))
+        if missing:
+            raise ValueError("kernel_details.csv missing required fields: " + ", ".join(missing))
+
+        for row in reader:
+            step_id = row.get("Step Id", "").strip()
+            if not step_id:
+                ignored_blank_step_rows += 1
+                continue
+            try:
+                duration = float(row.get("Duration(us)", "0"))
+            except (TypeError, ValueError):
+                continue
+            if duration <= 0:
+                continue
+            try:
+                start_time = float(str(row.get("Start Time(us)", "")).strip())
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"malformed Start Time(us) for step {step_id}: {row.get('Start Time(us)', '')!r}") from exc
+
+            op_type = row.get("Type", "")
+            input_shapes = row.get("Input Shapes", "")
+            name = row.get("Name", op_type)
+            if _is_warmup_kernel(op_type, input_shapes):
+                continue
+
+            step_kernel_times.setdefault(step_id, {}).setdefault(name, []).append(duration)
+            window = step_windows.setdefault(
+                step_id,
+                {
+                    "start_us": start_time,
+                    "end_us": start_time + duration,
+                    "kernel_duration_sum_us": 0.0,
+                    "kernel_count": 0,
+                },
+            )
+            window["start_us"] = min(float(window["start_us"]), start_time)
+            window["end_us"] = max(float(window["end_us"]), start_time + duration)
+            window["kernel_duration_sum_us"] = float(window["kernel_duration_sum_us"]) + duration
+            window["kernel_count"] = int(window["kernel_count"]) + 1
+
+    if not step_kernel_times:
+        raise ValueError(f"kernel_details.csv contains no measured baseline kernels; ignored_blank_step_rows={ignored_blank_step_rows}")
+
+    for window in step_windows.values():
+        active_window = max(float(window["end_us"]) - float(window["start_us"]), 0.0)
+        kernel_sum = float(window["kernel_duration_sum_us"])
+        window["start_us"] = round(float(window["start_us"]), 3)
+        window["end_us"] = round(float(window["end_us"]), 3)
+        window["kernel_duration_sum_us"] = round(kernel_sum, 2)
+        window["device_active_window_us"] = round(active_window, 2)
+        window["device_window_gap_us"] = round(max(active_window - kernel_sum, 0.0), 2)
+        window["device_window_minus_kernel_sum_us"] = round(active_window - kernel_sum, 2)
+
+    all_kernel_times: dict[str, list[float]] = {}
+    for kernels in step_kernel_times.values():
+        for name, times in kernels.items():
+            all_kernel_times.setdefault(name, []).append(sum(times))
+
+    device_kernels: dict[str, float] = {}
+    kernel_duration_sum_us = 0.0
+    for name, times in all_kernel_times.items():
+        median_time = _median(times)
+        device_kernels[name] = round(median_time, 2)
+        kernel_duration_sum_us += median_time
+
+    active_window_us = _median([float(window["device_active_window_us"]) for window in step_windows.values()])
+    median_step_kernel_sum_us = _median([float(window["kernel_duration_sum_us"]) for window in step_windows.values()])
+
+    return {
+        "device_kernels": device_kernels,
+        "device_kernel_duration_sum_us": round(kernel_duration_sum_us, 2),
+        "median_step_kernel_duration_sum_us": round(median_step_kernel_sum_us, 2),
+        "device_active_window_us": round(active_window_us, 2),
+        "device_window_gap_us": round(max(active_window_us - median_step_kernel_sum_us, 0.0), 2),
+        "step_windows": dict(sorted(step_windows.items(), key=lambda item: _step_sort_key(item[0]))),
+        "measured_step_count": len(step_windows),
+        "ignored_blank_step_rows": ignored_blank_step_rows,
+    }
+
+
+def parse_cannbench_timing_csv(csv_path: Path, strategy: str) -> dict[str, object]:
+    if strategy == "candidate_kernel_details":
+        parsed = parse_kernel_details_csv(csv_path)
+        return {
+            "latency_us": parsed["total_kernel_us"],
+            "device_kernels": parsed["device_kernels"],
+            "device_timeline": {"step_count": parsed["step_count"]},
+            "perf_metric_strategy": "kernel_details",
+            "measurement_scope": "visible_device_kernel_duration_sum",
+            "elapsed_us_source": "kernel_details.total_kernel_us",
+        }
+    if strategy == "baseline_active_window":
+        parsed = parse_baseline_active_window_csv(csv_path)
+        return {
+            "latency_us": parsed["device_active_window_us"],
+            "device_kernels": parsed["device_kernels"],
+            "device_timeline": {
+                "device_active_window_us": parsed["device_active_window_us"],
+                "device_kernel_duration_sum_us": parsed["device_kernel_duration_sum_us"],
+                "median_step_kernel_duration_sum_us": parsed["median_step_kernel_duration_sum_us"],
+                "device_window_gap_us": parsed["device_window_gap_us"],
+                "measured_step_count": parsed["measured_step_count"],
+                "ignored_blank_step_rows": parsed["ignored_blank_step_rows"],
+                "step_windows": parsed["step_windows"],
+            },
+            "perf_metric_strategy": "baseline_active_window",
+            "measurement_scope": "visible_device_active_window",
+            "elapsed_us_source": "baseline_active_window.device_active_window_us",
+        }
+    raise ValueError(f"unsupported timing strategy: {strategy}")
+
+
+def _file_snapshot(root: Path) -> tuple[tuple[str, int, int], ...]:
+    snapshot = []
+    if not root.is_dir():
+        return tuple()
+    for path in root.rglob("*"):
+        if not path.is_file() or path.name.endswith(".done"):
+            continue
+        stat = path.stat()
+        snapshot.append((str(path.relative_to(root)), stat.st_size, stat.st_mtime_ns))
+    return tuple(sorted(snapshot))
+
+
+def _wait_profiler_files_ready(root: Path, timeout_s: float = 10.0) -> None:
+    start = time.monotonic()
+    last_snapshot = None
+    stable_since = None
+    while True:
+        snapshot = _file_snapshot(root)
+        now = time.monotonic()
+        if snapshot and snapshot == last_snapshot:
+            if stable_since is None:
+                stable_since = now
+            if now - stable_since >= 0.2:
+                return
+        else:
+            last_snapshot = snapshot
+            stable_since = now if snapshot else None
+        if now - start >= timeout_s:
+            return
+        time.sleep(0.2)
+
+
+def _locate_profiler_files(root: Path) -> tuple[Path | None, Path | None]:
+    csv_path = None
+    trace_view_path = None
+    for path in root.rglob("kernel_details.csv"):
+        csv_path = path
+        break
+    for path in root.rglob("trace_view.json"):
+        trace_view_path = path
+        break
+    return csv_path, trace_view_path
+
+
+def _close_profiler_pool() -> None:
+    try:
+        from torch_npu.profiler.analysis.prof_common_func._multi_process_pool import MultiProcessPool
+
+        MultiProcessPool().close_pool(wait=True)
+    except Exception:
+        pass
+
+
+def profile_once(
+    label: str,
+    case_id: str,
+    func: Callable[[], torch.Tensor],
+    *,
+    timing_strategy: str,
+    device: str,
+    warmup: int,
+    repeat: int,
+    profiler_root: Path,
+    profiler_level: str,
+    profiler_aic_metrics: str,
+    profiler_export_type: str,
+    freq_boost: bool,
+) -> tuple[torch.Tensor | None, ProfileResult]:
+    """Profile one callable and parse it using the matching CANN-Bench strategy."""
+
+    prof_dir = profiler_root / case_id / label
+    if prof_dir.exists():
+        shutil.rmtree(prof_dir)
+    prof_dir.mkdir(parents=True, exist_ok=True)
+
+    last_output: torch.Tensor | None = None
+    try:
+        if freq_boost:
+            _boost_freq_and_clear_cache(device)
+
+        # CANN-Bench pre-flight: fail before opening profiler if the op cannot run.
+        last_output = func()
+        torch_npu.npu.synchronize()
+
+        experimental_config = _experimental_config(profiler_level, profiler_aic_metrics, profiler_export_type)
+        original_basic_config = logging.basicConfig
+        logging.basicConfig = lambda **kw: original_basic_config(**{**kw, "level": logging.ERROR, "force": True})
+        for logger_name in ["", "torch", "torch_npu", "torch_npu.profiler", "ascend", "profiler"]:
+            logger = logging.getLogger(logger_name)
+            logger.setLevel(logging.ERROR)
+            logger.handlers = []
+            logger.addHandler(logging.NullHandler())
+
+        saved_stdout_fd = os.dup(1)
+        saved_stderr_fd = os.dup(2)
+        sink = tempfile.NamedTemporaryFile(mode="w+", prefix="add_rms_norm_profiler_", suffix=".log", delete=False)
+        try:
+            os.dup2(sink.fileno(), 1)
+            os.dup2(sink.fileno(), 2)
+            with torch_npu.profiler.profile(
+                activities=[
+                    torch_npu.profiler.ProfilerActivity.CPU,
+                    torch_npu.profiler.ProfilerActivity.NPU,
+                ],
+                schedule=torch_npu.profiler.schedule(wait=0, warmup=warmup, active=repeat, repeat=1),
+                on_trace_ready=torch_npu.profiler.tensorboard_trace_handler(str(prof_dir)),
+                record_shapes=False,
+                profile_memory=False,
+                with_stack=False,
+                experimental_config=experimental_config,
+            ) as prof:
+                pending_exc: BaseException | None = None
+                for i in range(warmup + repeat):
+                    if freq_boost and i >= warmup:
+                        _clear_cache(device)
+                    try:
+                        last_output = func()
+                    except BaseException as exc:
+                        pending_exc = exc
+                        prof.step()
+                        break
+                    prof.step()
+                if pending_exc is not None:
+                    raise pending_exc
+            time.sleep(0.1)
+            _close_profiler_pool()
+        finally:
+            os.dup2(saved_stdout_fd, 1)
+            os.dup2(saved_stderr_fd, 2)
+            os.close(saved_stdout_fd)
+            os.close(saved_stderr_fd)
+            logging.basicConfig = original_basic_config
+            sink.close()
+            try:
+                os.unlink(sink.name)
+            except OSError:
+                pass
+
+        _wait_profiler_files_ready(prof_dir)
+        csv_path, trace_view_path = _locate_profiler_files(prof_dir)
+        if csv_path is None:
+            return last_output, ProfileResult(
+                None,
+                {},
+                {},
+                None,
+                str(trace_view_path) if trace_view_path else None,
+                "kernel_details.csv not found",
+                timing_strategy,
+            )
+        timing_data = parse_cannbench_timing_csv(csv_path, timing_strategy)
+        latency = float(timing_data.get("latency_us") or 0.0)
+        if latency <= 0:
+            return last_output, ProfileResult(
+                None,
+                timing_data.get("device_kernels", {}),
+                timing_data.get("device_timeline", {}),
+                str(csv_path),
+                str(trace_view_path) if trace_view_path else None,
+                "parsed latency_us is non-positive",
+                timing_data.get("perf_metric_strategy", timing_strategy),
+                timing_data.get("measurement_scope", ""),
+                timing_data.get("elapsed_us_source", ""),
+            )
+        return last_output, ProfileResult(
+            latency,
+            timing_data.get("device_kernels", {}),
+            timing_data.get("device_timeline", {}),
+            str(csv_path),
+            str(trace_view_path) if trace_view_path else None,
+            None,
+            str(timing_data.get("perf_metric_strategy", timing_strategy)),
+            str(timing_data.get("measurement_scope", "")),
+            str(timing_data.get("elapsed_us_source", "")),
+        )
+    except Exception as exc:
+        return last_output, ProfileResult(None, {}, {}, None, None, f"{type(exc).__name__}: {exc}", timing_strategy)
+
+
+def _path_key(path: str) -> str:
+    return path.replace("/", "_").replace(" ", "_")
+
+
+def run_case(
+    case: Case,
+    index: int,
+    seed: int,
+    device: str,
+    benchmark: bool,
+    warmup: int,
+    repeat: int,
+    profiler_root: Path,
+    profiler_level: str,
+    profiler_aic_metrics: str,
+    profiler_export_type: str,
+    freq_boost: bool,
+) -> dict[str, object]:
+    del seed
+    x1, x2, gamma = make_inputs(case.shape, index, device)
+    cpu_x1 = x1.cpu()
+    cpu_x2 = x2.cpu()
+    cpu_gamma = gamma.cpu()
+    expected = add_rms_norm_cannbench_golden(
+        cpu_x1.to(torch.float64),
+        cpu_x2.to(torch.float64),
+        cpu_gamma.to(torch.float64),
+    )
+    native_expected = add_rms_norm_cannbench_golden(cpu_x1, cpu_x2, cpu_gamma)
+
+    implementations: dict[str, dict[str, object]] = {
+        "triton": {
+            "fn": lambda: add_rms_norm(x1, x2, gamma),
+            "timing_strategy": "candidate_kernel_details",
+            "role": "candidate",
+        },
+        "torch": {
+            "fn": lambda: add_rms_norm_reference(x1, x2, gamma),
+            "timing_strategy": "baseline_active_window",
+            "role": "pytorch_semantic_baseline",
+        },
+        "torch_npu": {
+            "fn": lambda: add_rms_norm_torch_npu(x1, x2, gamma),
+            "timing_strategy": "baseline_active_window",
+            "role": "task_npu_baseline_probe",
+        },
+    }
+
+    result: dict[str, object] = {
+        "case": index,
+        "case_id": _cannbench_case_id(index),
+        "case_seed": _cannbench_case_seed(index),
+        "kind": case.kind,
+        "shape": list(case.shape),
+        "dtype": "bfloat16",
+        "threshold": BF16_THRESHOLD,
+        "value_range": [[-1.0, 1.0], [-1.0, 1.0], [0.5, 1.5]],
+        "timing_policy": (
+            "Triton candidate uses CANN-Bench KernelDetailsStrategy; "
+            "Torch semantic and torch_npu baselines use custom-baseline BaselineActiveWindowStrategy."
+        ),
+        "implementations": {},
+    }
+
+    for name, spec in implementations.items():
+        func = spec["fn"]
+        assert callable(func)
+        output = None
+        profile = ProfileResult(None, {}, {}, None, None, None)
+        if benchmark:
+            output, profile = profile_once(
+                name,
+                f"case_{index:03d}",
+                func,
+                timing_strategy=str(spec["timing_strategy"]),
+                device=device,
+                warmup=warmup,
+                repeat=repeat,
+                profiler_root=profiler_root,
+                profiler_level=profiler_level,
+                profiler_aic_metrics=profiler_aic_metrics,
+                profiler_export_type=profiler_export_type,
+                freq_boost=freq_boost,
+            )
+        else:
+            try:
+                output = func()
+                torch_npu.npu.synchronize()
+            except Exception as exc:
+                profile.error = f"{type(exc).__name__}: {exc}"
+
+        if output is not None:
+            accuracy = cannbench_bf16_compare(output, expected, native_expected)
+        else:
+            accuracy = {
+                "passed": False,
+                "threshold": BF16_THRESHOLD,
+                "mere": 0.0,
+                "mare": 0.0,
+                "max_diff": 0.0,
+                "mean_diff": 0.0,
+                "mismatch_count": int(x1.numel()),
+                "total_count": int(x1.numel()),
+                "error_msg": profile.error or "no output",
+            }
+
+        result["implementations"][name] = {
+            "accuracy": accuracy,
+            "role": spec["role"],
+            "timing_strategy": spec["timing_strategy"],
+            "perf_metric_strategy": profile.perf_metric_strategy,
+            "measurement_scope": profile.measurement_scope,
+            "elapsed_us_source": profile.elapsed_us_source,
+            "latency_us": profile.latency_us,
+            "latency": format_latency_us(profile.latency_us),
+            "device_kernels": profile.device_kernels,
+            "device_timeline": profile.device_timeline,
+            "profiler_csv_path": profile.csv_path,
+            "profiler_trace_view_path": profile.trace_view_path,
+            "profile_error": profile.error,
+        }
+
+    impls = result["implementations"]
+    triton_latency = impls["triton"]["latency_us"]
+    for base_name in ["torch", "torch_npu"]:
+        base_latency = impls[base_name]["latency_us"]
+        if triton_latency and base_latency:
+            impls[base_name]["speedup_vs_triton"] = float(base_latency) / float(triton_latency)
+            impls[base_name]["speedup_vs_triton_text"] = format_speedup(impls[base_name]["speedup_vs_triton"])
+        else:
+            impls[base_name]["speedup_vs_triton"] = None
+            impls[base_name]["speedup_vs_triton_text"] = "N/A"
+    torch_npu_available = bool(
+        impls["torch_npu"]["accuracy"]["passed"] and impls["torch_npu"]["latency_us"]
+    )
+    selected_name = "torch_npu" if torch_npu_available else "torch"
+    selected_latency = impls[selected_name]["latency_us"]
+    selected_speedup = (
+        float(selected_latency) / float(triton_latency)
+        if triton_latency and selected_latency
+        else None
+    )
+    result["selected_baseline"] = {
+        "implementation": selected_name,
+        "source": "task_npu_baseline_probe" if selected_name == "torch_npu" else "pytorch_semantic_baseline",
+        "selection_rule": (
+            "Use torch_npu.npu_add_rms_norm only when its output passes the same "
+            "BF16 CANN-Bench precision check; otherwise use the Torch semantic baseline."
+        ),
+        "latency_us": selected_latency,
+        "latency": format_latency_us(selected_latency),
+        "speedup_vs_triton": selected_speedup,
+        "speedup_vs_triton_text": format_speedup(selected_speedup),
+        "perf_metric_strategy": impls[selected_name]["perf_metric_strategy"],
+        "measurement_scope": impls[selected_name]["measurement_scope"],
+        "elapsed_us_source": impls[selected_name]["elapsed_us_source"],
+    }
+    return result
+
+
+def print_case(record: dict[str, object], total: int) -> None:
+    impls = record["implementations"]
+    triton = impls["triton"]
+    torch_impl = impls["torch"]
+    torch_npu_impl = impls["torch_npu"]
+    triton_acc = triton["accuracy"]
+    status = "PASS" if triton_acc["passed"] else "FAIL"
+    print(
+        f"[{status}] {record['case']:03d}/{total:03d} {record['kind']} shape={tuple(record['shape'])} "
+        f"triton={triton['latency']} torch={torch_impl['latency']} "
+        f"speedup_vs_torch={torch_impl['speedup_vs_triton_text']} "
+        f"torch_npu={torch_npu_impl['latency']} "
+        f"speedup_vs_torch_npu={torch_npu_impl['speedup_vs_triton_text']} "
+        f"triton_accuracy={'PASS' if triton_acc['passed'] else 'FAIL'} "
+        f"torch_accuracy={'PASS' if torch_impl['accuracy']['passed'] else 'FAIL'} "
+        f"torch_npu_accuracy={'PASS' if torch_npu_impl['accuracy']['passed'] else 'FAIL'} "
+        f"MERE={triton_acc['mere']:.3e} MARE={triton_acc['mare']:.3e} "
+        f"max_diff={triton_acc['max_diff']:.3e} "
+        f"triton_source={triton['elapsed_us_source']} "
+        f"torch_source={torch_impl['elapsed_us_source']} "
+        f"torch_npu_source={torch_npu_impl['elapsed_us_source']}"
+    )
+
+
+def summarize(records: list[dict[str, object]]) -> None:
+    passed = sum(1 for r in records if r["implementations"]["triton"]["accuracy"]["passed"])
+    triton_latencies = [r["implementations"]["triton"]["latency_us"] for r in records]
+    torch_latencies = [r["implementations"]["torch"]["latency_us"] for r in records]
+    torch_npu_latencies = [r["implementations"]["torch_npu"]["latency_us"] for r in records]
+    triton_latencies = [float(v) for v in triton_latencies if v is not None]
+    torch_latencies = [float(v) for v in torch_latencies if v is not None]
+    torch_npu_latencies = [float(v) for v in torch_npu_latencies if v is not None]
+    speedups_torch = [
+        r["implementations"]["torch"]["speedup_vs_triton"]
+        for r in records
+        if r["implementations"]["torch"]["speedup_vs_triton"] is not None
+    ]
+    speedups_torch_npu = [
+        r["implementations"]["torch_npu"]["speedup_vs_triton"]
+        for r in records
+        if r["implementations"]["torch_npu"]["accuracy"]["passed"]
+        and r["implementations"]["torch_npu"]["speedup_vs_triton"] is not None
+    ]
+    selected_speedups = [
+        r["selected_baseline"]["speedup_vs_triton"]
+        for r in records
+        if r.get("selected_baseline")
+        and r["selected_baseline"]["speedup_vs_triton"] is not None
+    ]
+    torch_npu_acc_pass = sum(1 for r in records if r["implementations"]["torch_npu"]["accuracy"]["passed"])
+    torch_acc_pass = sum(1 for r in records if r["implementations"]["torch"]["accuracy"]["passed"])
+    print(
+        f"SUMMARY passed={passed}/{len(records)} threshold={BF16_THRESHOLD:.8f} "
+        f"torch_accuracy_pass={torch_acc_pass}/{len(records)} "
+        f"torch_npu_accuracy_pass={torch_npu_acc_pass}/{len(records)} "
+        f"selected_task_npu_baseline={torch_npu_acc_pass} selected_torch_fallback={len(records) - torch_npu_acc_pass} "
+        f"triton_strategy=kernel_details triton_scope=visible_device_kernel_duration_sum "
+        f"baseline_strategy=baseline_active_window baseline_scope=visible_device_active_window"
+    )
+    if triton_latencies:
+        print(
+            f"LATENCY triton_geomean={geomean(triton_latencies):.3f} us "
+            f"triton_min={min(triton_latencies):.3f} us triton_max={max(triton_latencies):.3f} us "
+            f"torch_geomean={geomean(torch_latencies):.3f} us "
+            f"torch_npu_geomean={geomean(torch_npu_latencies):.3f} us "
+            f"speedup_vs_torch_geomean={format_speedup(geomean(speedups_torch) if speedups_torch else None)} "
+            f"speedup_vs_torch_npu_pass_geomean={format_speedup(geomean(speedups_torch_npu) if speedups_torch_npu else None)} "
+            f"selected_baseline_speedup_geomean={format_speedup(geomean(selected_speedups) if selected_speedups else None)}"
+        )
 
 
 def main() -> None:
@@ -184,95 +1045,58 @@ def main() -> None:
     parser.add_argument("--device", default="npu", help="Torch device, default: npu")
     parser.add_argument("--public", action="store_true", help="Run all 80 public B/S/H cases.")
     parser.add_argument("--generalization", action="store_true", help="Run additional non-public shape cases.")
-    parser.add_argument("--benchmark", action="store_true", help="Print simple wall-clock latency smoke numbers.")
+    parser.add_argument("--benchmark", action="store_true", help="Use CANN-Bench-style profiler timing.")
     parser.add_argument("--warmup", type=int, default=3)
     parser.add_argument("--repeat", type=int, default=5)
+    parser.add_argument("--max-cases", type=int, default=None, help="Limit cases for smoke checks.")
+    parser.add_argument("--jsonl", type=Path, default=None, help="Write per-case machine-readable results.")
+    parser.add_argument("--profiler-data-dir", type=Path, default=Path("logs/prof_data"))
+    parser.add_argument("--profiler-level", default="Level1")
+    parser.add_argument("--profiler-aic-metrics", default="PipeUtilization")
+    parser.add_argument("--profiler-export-type", default="Text")
+    parser.add_argument("--no-freq-boost", action="store_true", help="Disable CANN-Bench-style freq/cache warmup.")
     args = parser.parse_args()
 
     if torch_npu is None:
         raise RuntimeError("torch_npu is required for NPU validation")
 
-    selected = []
+    selected: list[Case] = []
     if args.public or not args.generalization:
         selected.extend(public_cases())
     if args.generalization:
         selected.extend(generalization_cases())
+    if args.max_cases is not None:
+        selected = selected[: args.max_cases]
 
-    max_mere = 0.0
-    max_mare = 0.0
-    max_diff = 0.0
-    triton_latencies = []
-    torch_latencies = []
-    speedups_vs_torch = []
-    torch_npu_latencies = []
-    speedups_vs_torch_npu = []
-    speedups_vs_valid_torch_npu = []
-    torch_npu_accuracy_counts = {"PASS": 0, "FAIL": 0, "ERROR": 0}
-    for index, case in enumerate(selected):
-        metrics = run_case(case, 20260612 + index, args.device, args.benchmark, args.warmup, args.repeat)
-        max_mere = max(max_mere, metrics["mere"])
-        max_mare = max(max_mare, metrics["mare"])
-        max_diff = max(max_diff, metrics["max_diff"])
-        latency_text = ""
-        if "triton_latency_us" in metrics:
-            triton_latency = metrics["triton_latency_us"]
-            torch_latency = metrics["torch_latency_us"]
-            speedup_vs_torch = metrics["speedup_vs_torch"]
-            triton_latencies.append(triton_latency)
-            torch_latencies.append(torch_latency)
-            speedups_vs_torch.append(speedup_vs_torch)
-            torch_npu_accuracy = str(metrics["torch_npu_accuracy"])
-            torch_npu_accuracy_counts[torch_npu_accuracy] += 1
-            torch_npu_latency = metrics["torch_npu_latency_us"]
-            speedup_vs_torch_npu = metrics["speedup_vs_torch_npu"]
-            if torch_npu_latency is not None:
-                torch_npu_latencies.append(torch_npu_latency)
-                speedups_vs_torch_npu.append(speedup_vs_torch_npu)
-                if torch_npu_accuracy == "PASS":
-                    speedups_vs_valid_torch_npu.append(speedup_vs_torch_npu)
-            latency_text = (
-                f" triton={format_latency_us(triton_latency)}"
-                f" torch={format_latency_us(torch_latency)}"
-                f" speedup_vs_torch={format_speedup(speedup_vs_torch)}"
-                f" torch_npu={format_latency_us(torch_npu_latency)}"
-                f" speedup_vs_torch_npu={format_speedup(speedup_vs_torch_npu)}"
-                f" torch_npu_accuracy={torch_npu_accuracy}"
-            )
-            if "torch_npu_error" in metrics:
-                latency_text += f" torch_npu_error={metrics['torch_npu_error']}"
-        print(
-            f"[PASS] {index + 1:03d}/{len(selected):03d} "
-            f"{case.kind} shape={case.shape} "
-            f"MERE={metrics['mere']:.3e} MARE={metrics['mare']:.3e} max_diff={metrics['max_diff']:.3e}"
-            f"{latency_text}"
-        )
+    if args.jsonl:
+        args.jsonl.parent.mkdir(parents=True, exist_ok=True)
+        args.jsonl.write_text("")
+    if args.benchmark:
+        args.profiler_data_dir.mkdir(parents=True, exist_ok=True)
 
-    print(
-        f"SUMMARY passed={len(selected)} threshold={2**-7:.8f} "
-        f"max_mere={max_mere:.3e} max_mare={max_mare:.3e} max_diff={max_diff:.3e}"
-    )
-    if triton_latencies:
-        print(
-            f"LATENCY triton_geomean={geomean(triton_latencies):.3f} us "
-            f"triton_min={min(triton_latencies):.3f} us triton_max={max(triton_latencies):.3f} us "
-            f"torch_geomean={geomean(torch_latencies):.3f} us "
-            f"torch_min={min(torch_latencies):.3f} us torch_max={max(torch_latencies):.3f} us "
-            f"speedup_vs_torch_geomean={geomean(speedups_vs_torch):.6f}x"
+    records = []
+    for index, case in enumerate(selected, start=1):
+        record = run_case(
+            case,
+            index,
+            20260612 + index - 1,
+            args.device,
+            args.benchmark,
+            args.warmup,
+            args.repeat,
+            args.profiler_data_dir,
+            args.profiler_level,
+            args.profiler_aic_metrics,
+            args.profiler_export_type,
+            not args.no_freq_boost,
         )
-        valid_torch_npu_speedup = (
-            f"{geomean(speedups_vs_valid_torch_npu):.6f}x" if speedups_vs_valid_torch_npu else "N/A"
-        )
-        print(
-            f"LATENCY_TORCH_NPU timed_cases={len(torch_npu_latencies)} "
-            f"accuracy_pass={torch_npu_accuracy_counts['PASS']} "
-            f"accuracy_fail={torch_npu_accuracy_counts['FAIL']} "
-            f"accuracy_error={torch_npu_accuracy_counts['ERROR']} "
-            f"torch_npu_geomean={format_latency_us(geomean(torch_npu_latencies) if torch_npu_latencies else None)} "
-            f"torch_npu_min={format_latency_us(min(torch_npu_latencies) if torch_npu_latencies else None)} "
-            f"torch_npu_max={format_latency_us(max(torch_npu_latencies) if torch_npu_latencies else None)} "
-            f"speedup_vs_torch_npu_timed_geomean={format_speedup(geomean(speedups_vs_torch_npu) if speedups_vs_torch_npu else None)} "
-            f"speedup_vs_torch_npu_accuracy_pass_geomean={valid_torch_npu_speedup}"
-        )
+        records.append(record)
+        print_case(record, len(selected))
+        if args.jsonl:
+            with args.jsonl.open("a", encoding="utf-8") as f:
+                f.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n")
+
+    summarize(records)
 
 
 if __name__ == "__main__":

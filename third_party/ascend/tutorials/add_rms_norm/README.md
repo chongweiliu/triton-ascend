@@ -29,7 +29,8 @@ yOut = z * rsqrt(mean(z * z, axis=-1, keepdims=True) + epsilon) * gamma
 ## 文件说明
 
 - `add_rms_norm.py`：Triton-Ascend kernel 及 Python 调用封装。
-- `validate_add_rms_norm.py`：功能验证脚本，并支持可选的端到端耗时冒烟测试。
+- `validate_add_rms_norm.py`：功能验证脚本，并支持 CANN-Bench 对齐的三路
+  性能/精度采集。
 - `DESIGN.md`：算子设计文档。
 - `SELF_VALIDATION_REPORT.md`：基于 OpForge CANN-Bench 证据整理的自验证报告。
 - `AddRmsNorm算子设计方案.docx`：按官方 `XXX算子设计方案.docx` 模板填写的
@@ -46,18 +47,26 @@ yOut = z * rsqrt(mean(z * z, axis=-1, keepdims=True) + epsilon) * gamma
 python3 validate_add_rms_norm.py --public --generalization
 ```
 
-可选的冒烟性能采集命令：
+可选的 CANN-Bench 对齐三路性能采集命令：
 
 ```bash
-python3 validate_add_rms_norm.py --public --benchmark --warmup 3 --repeat 5
+python3 validate_add_rms_norm.py --public --benchmark --warmup 3 --repeat 5 \
+  --jsonl logs/add_rms_norm_cannbench_aligned_$(date +%Y%m%d_%H%M%S).jsonl \
+  --profiler-data-dir logs/prof_data_cannbench_aligned
 ```
 
 验证脚本需要可用的 `torch`、`torch_npu`、Triton-Ascend 以及 Ascend NPU 环境。
 脚本会将 Triton-Ascend 输出与 PyTorch 语义参考结果进行 BF16 L1 精度口径对比。
-启用 `--benchmark` 时，脚本会逐 case 输出三路 wall-clock 冒烟性能数据：
+启用 `--benchmark` 时，脚本会逐 case 用 `torch_npu.profiler` 采集三路数据：
 Triton-Ascend 交付实现、NPU 上的 PyTorch 语义公式实现，以及
-`torch_npu.npu_add_rms_norm`。`torch_npu` 路径会额外标注其输出相对 PyTorch
-语义参考的精度状态；精度未通过的用例不能作为正确基线结论，只作为实测对照数据。
+`torch_npu.npu_add_rms_norm`。计时方式按 CANN-Bench 中每条路径实际使用的策略
+对齐：Triton 候选使用 `KernelDetailsStrategy`，
+`elapsed_us_source=kernel_details.total_kernel_us`，计量范围为
+`visible_device_kernel_duration_sum`；Torch 语义实现和 `torch_npu` helper 使用
+custom baseline 的 `BaselineActiveWindowStrategy`，
+`elapsed_us_source=baseline_active_window.device_active_window_us`，计量范围为
+`visible_device_active_window`。这些数据不是 Python wall-clock，也不是三路都用同一种
+kernel duration。
 
 ## 实现说明
 
@@ -94,9 +103,16 @@ fallback 基线，因为公开 NPU baseline 在这些用例上未能通过数值
 “80 个用例全部快于 CANN AddRmsNorm”，应使用 `SELF_VALIDATION_REPORT.md` 中的
 分组性能数据。
 
-交付目录内的 `logs/` 和 `AddRmsNorm算子自验证报告.xlsx` 还包含从本目录直接运行
-验证脚本得到的 80 case wall-clock 冒烟对比。该对比用于自验证截图/日志证据；
-正式性能结论仍以 OpForge CANN-Bench 设备侧计时和基线拆分为准。
+交付目录内的 `logs/` 和 `AddRmsNorm算子自验证报告.xlsx` 包含从本目录直接运行
+验证脚本得到的 80 case 三路对比。本次交付自验证日志
+`logs/add_rms_norm_cannbench_aligned_20260612.log` 及同名 JSONL 显示：
+Triton 候选 80/80 通过，PyTorch 语义实现 80/80 通过，
+`torch_npu.npu_add_rms_norm` helper 61/80 通过；xlsx 中的性能和精度表格只从
+`logs/add_rms_norm_cannbench_aligned_20260612.jsonl` 生成。按本次自验证 JSONL
+统计，Speedup vs Torch 语义实现 geomean 为 `17.232065x`；Speedup vs
+torch_npu helper 只在 helper 精度通过的 61 个用例上统计，geomean 为
+`9.963093x`；按“torch_npu 通过则选 torch_npu，否则选 Torch”的可用基线规则，
+选中基线 geomean speedup 为 `11.319563x`。
 
 ## 已知限制
 

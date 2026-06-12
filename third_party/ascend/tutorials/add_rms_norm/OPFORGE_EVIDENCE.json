@@ -47,6 +47,41 @@
     "failed_count": 0,
     "status": "passed"
   },
+  "delivery_self_validation": {
+    "source_jsonl": "logs/add_rms_norm_cannbench_aligned_20260612.jsonl",
+    "source_log": "logs/add_rms_norm_cannbench_aligned_20260612.log",
+    "public_cases": 80,
+    "triton_accuracy_passed": 80,
+    "torch_accuracy_passed": 80,
+    "torch_npu_accuracy_passed": 61,
+    "selected_baseline_counts": {
+      "task_npu_baseline_probe": 61,
+      "pytorch_semantic_baseline": 19
+    },
+    "timing_strategy": {
+      "triton": {
+        "perf_metric_strategy": "kernel_details",
+        "measurement_scope": "visible_device_kernel_duration_sum",
+        "elapsed_us_source": "kernel_details.total_kernel_us"
+      },
+      "torch": {
+        "perf_metric_strategy": "baseline_active_window",
+        "measurement_scope": "visible_device_active_window",
+        "elapsed_us_source": "baseline_active_window.device_active_window_us"
+      },
+      "torch_npu": {
+        "perf_metric_strategy": "baseline_active_window",
+        "measurement_scope": "visible_device_active_window",
+        "elapsed_us_source": "baseline_active_window.device_active_window_us"
+      }
+    },
+    "triton_geomean_us": 19.941828,
+    "torch_geomean_us": 343.638892,
+    "torch_npu_geomean_us_all_timed": 209.042882,
+    "speedup_vs_torch_geomean": 17.232065,
+    "speedup_vs_torch_npu_pass_geomean": 9.963093,
+    "selected_baseline_speedup_geomean": 11.319563
+  },
   "important_limitations": [
     "Only 21 of 80 calibrated baselines used torch_npu.npu_add_rms_norm. The other 59 used PyTorch semantic fallback because the public NPU baseline did not validate numerically for those cases.",
     "The public CANN-Bench status is PERF_REGRESSION because some small cases remain below the performance threshold."

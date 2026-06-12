@@ -137,6 +137,17 @@ OpForge CANN-Bench `eval_20260612_155910` 证据显示：
 “80/80 用例均快于 CANN AddRmsNorm”，因为其中 59 个用例的基线来源是 PyTorch
 语义 fallback。
 
+交付目录内的 `validate_add_rms_norm.py --public --benchmark --warmup 3 --repeat 5`
+还会重测 Triton 候选、PyTorch 语义实现和 `torch_npu.npu_add_rms_norm` helper
+三路数据。该脚本按路径复刻 CANN-Bench 计时方式：候选 Triton 使用
+`KernelDetailsStrategy` 的 `kernel_details.total_kernel_us`，Torch 语义实现和
+`torch_npu` helper 使用 custom baseline 的 `BaselineActiveWindowStrategy`，
+即 `baseline_active_window.device_active_window_us`。本次交付自验证 JSONL
+显示：Triton 候选 80/80 通过，Torch 语义实现 80/80 通过，`torch_npu`
+helper 61/80 通过；Speedup vs Torch 语义实现 geomean 为 `17.232065x`，
+Speedup vs torch_npu helper 在 helper 精度通过的 61 个用例上 geomean 为
+`9.963093x`。
+
 ## 8. 风险与后续工作
 
 - 在最终 HiDevLab/Triton-Ascend 环境中重新运行验证，并按评审流程补充原始日志和截图。
