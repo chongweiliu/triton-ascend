@@ -1,0 +1,54 @@
+{
+  "source": "SLAI-Ascend-OpForge CANN-Bench custom AddRmsNorm evaluation",
+  "run_id": "eval_20260612_155910",
+  "agent_workspace": "/mnt/model/lcw/SLAI-Ascend-OpForge/runs/CANNBench_Custom_add_rms_norm/agents/triton-ascend",
+  "status": "PERF_REGRESSION",
+  "correct": 80,
+  "total": 80,
+  "failed": 0,
+  "score": 102.29032938011937,
+  "geomean_speedup": 8.269903861606247,
+  "min_speedup": 0.48507462686567165,
+  "mean_latency_us": 56.786125,
+  "median_latency_us": 15.55,
+  "p95_latency_us": 225.16599999999977,
+  "baseline_source_counts": {
+    "task_npu_baseline": 21,
+    "pytorch_fallback": 59
+  },
+  "speedup_by_baseline_source": {
+    "task_npu_baseline": {
+      "n": 21,
+      "geomean_speedup": 3.356044756270969,
+      "mean_speedup": 5.218322732625236,
+      "min_speedup": 0.48507462686567165,
+      "max_speedup": 21.716638513513512
+    },
+    "pytorch_fallback": {
+      "n": 59,
+      "geomean_speedup": 11.400119243334245,
+      "mean_speedup": 17.89928830021203,
+      "min_speedup": 1.8701171875,
+      "max_speedup": 63.32599118942731
+    }
+  },
+  "accuracy": {
+    "dtype": "bfloat16",
+    "threshold": 0.0078125,
+    "public_cases_passed": 80,
+    "public_cases_failed": 0,
+    "total_mismatch_count": 0,
+    "max_mare": 0.007812499609375021,
+    "max_diff": 0.015625
+  },
+  "generalization_audit": {
+    "run_id": "manual_generalization_audit_40_fixed_20260612_155512",
+    "case_count": 40,
+    "failed_count": 0,
+    "status": "passed"
+  },
+  "important_limitations": [
+    "Only 21 of 80 calibrated baselines used torch_npu.npu_add_rms_norm. The other 59 used PyTorch semantic fallback because the public NPU baseline did not validate numerically for those cases.",
+    "The public CANN-Bench status is PERF_REGRESSION because some small cases remain below the performance threshold."
+  ]
+}
