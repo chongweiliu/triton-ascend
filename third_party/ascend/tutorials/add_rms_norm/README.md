@@ -32,6 +32,10 @@ yOut = z * rsqrt(mean(z * z, axis=-1, keepdims=True) + epsilon) * gamma
 - `validate_add_rms_norm.py`：功能验证脚本，并支持可选的端到端耗时冒烟测试。
 - `DESIGN.md`：算子设计文档。
 - `SELF_VALIDATION_REPORT.md`：基于 OpForge CANN-Bench 证据整理的自验证报告。
+- `AddRmsNorm算子设计方案.docx`：按官方 `XXX算子设计方案.docx` 模板填写的
+  正式设计文档。
+- `AddRmsNorm算子自验证报告.xlsx`：按官方 `XXX算子自验证报告.xlsx` 模板填写的
+  80 case 自验证报告。
 - `OPFORGE_EVIDENCE.json`：当前 OpForge 评测证据的结构化副本。
 
 ## 运行验证
