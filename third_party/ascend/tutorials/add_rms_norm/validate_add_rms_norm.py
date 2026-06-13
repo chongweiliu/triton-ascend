@@ -79,6 +79,11 @@ class Case:
 @dataclass
 class ProfileResult:
     latency_us: float | None
+    active_window_us: float | None
+    kernel_sum_us: float | None
+    window_gap_us: float | None
+    kernel_count: int | None
+    step_count: int | None
     device_kernels: dict[str, float]
     device_timeline: dict[str, object]
     csv_path: str | None
@@ -385,6 +390,34 @@ def format_speedup(value: float | None) -> str:
     return f"{value:.6f}x"
 
 
+def speedup(numerator_us: object, denominator_us: object) -> float | None:
+    try:
+        numerator = float(numerator_us) if numerator_us is not None else 0.0
+        denominator = float(denominator_us) if denominator_us is not None else 0.0
+    except (TypeError, ValueError):
+        return None
+    if numerator <= 0.0 or denominator <= 0.0:
+        return None
+    return numerator / denominator
+
+
+def make_speedup_matrix(
+    candidate_active_us: object,
+    candidate_kernel_us: object,
+    baseline_active_us: object,
+    baseline_kernel_us: object,
+) -> dict[str, float | None | str]:
+    matrix: dict[str, float | None | str] = {
+        "active_vs_active": speedup(baseline_active_us, candidate_active_us),
+        "kernel_vs_kernel": speedup(baseline_kernel_us, candidate_kernel_us),
+        "baseline_active_vs_candidate_kernel": speedup(baseline_active_us, candidate_kernel_us),
+        "baseline_kernel_vs_candidate_active": speedup(baseline_kernel_us, candidate_active_us),
+    }
+    for key, value in list(matrix.items()):
+        matrix[f"{key}_text"] = format_speedup(value if isinstance(value, float) else None)
+    return matrix
+
+
 def _profiler_enum(enum_owner, enum_name: str, enum_type: str):
     try:
         return getattr(enum_owner, enum_name)
@@ -465,54 +498,11 @@ def _median(values: list[float]) -> float:
     return (sorted_values[n // 2 - 1] + sorted_values[n // 2]) / 2
 
 
-def parse_kernel_details_csv(csv_path: Path) -> dict[str, object]:
-    """CANN-Bench KernelDetailsStrategy equivalent for kernel_details.csv."""
-
-    step_kernel_times: dict[str, dict[str, list[float]]] = {}
-    with csv_path.open("r", encoding="utf-8") as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            step_id = row.get("Step Id", "").strip()
-            if not step_id:
-                continue
-            try:
-                duration = float(row.get("Duration(us)", "0"))
-            except (TypeError, ValueError):
-                continue
-            if duration <= 0:
-                continue
-            op_type = row.get("Type", "")
-            input_shapes = row.get("Input Shapes", "")
-            name = row.get("Name", op_type)
-            if _is_warmup_kernel(op_type, input_shapes):
-                continue
-            step_kernel_times.setdefault(step_id, {}).setdefault(name, []).append(duration)
-
-    all_kernel_times: dict[str, list[float]] = {}
-    for kernels in step_kernel_times.values():
-        for name, times in kernels.items():
-            all_kernel_times.setdefault(name, []).append(sum(times))
-
-    device_kernels: dict[str, float] = {}
-    total_kernel_us = 0.0
-    for name, times in all_kernel_times.items():
-        median_time = _median(times)
-        device_kernels[name] = round(median_time, 2)
-        total_kernel_us += median_time
-
-    return {
-        "device_kernels": device_kernels,
-        "total_kernel_us": round(total_kernel_us, 2),
-        "step_count": len(step_kernel_times),
-    }
-
-
-def parse_baseline_active_window_csv(csv_path: Path) -> dict[str, object]:
-    """CANN-Bench custom baseline BaselineActiveWindowStrategy equivalent."""
+def parse_visible_device_timing_csv(csv_path: Path) -> dict[str, object]:
+    """Parse visible NPU kernel time and active-window time from kernel_details.csv."""
 
     step_kernel_times: dict[str, dict[str, list[float]]] = {}
     step_windows: dict[str, dict[str, object]] = {}
-    ignored_blank_step_rows = 0
 
     with csv_path.open("r", encoding="utf-8") as f:
         reader = csv.DictReader(f)
@@ -521,15 +511,14 @@ def parse_baseline_active_window_csv(csv_path: Path) -> dict[str, object]:
         if missing:
             raise ValueError("kernel_details.csv missing required fields: " + ", ".join(missing))
 
-        for row in reader:
+        for row_number, row in enumerate(reader, start=2):
             step_id = row.get("Step Id", "").strip()
             if not step_id:
-                ignored_blank_step_rows += 1
-                continue
+                raise ValueError(f"kernel_details.csv has blank Step Id at row {row_number}")
             try:
                 duration = float(row.get("Duration(us)", "0"))
-            except (TypeError, ValueError):
-                continue
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"malformed Duration(us) for step {step_id}: {row.get('Duration(us)', '')!r}") from exc
             if duration <= 0:
                 continue
             try:
@@ -559,7 +548,7 @@ def parse_baseline_active_window_csv(csv_path: Path) -> dict[str, object]:
             window["kernel_count"] = int(window["kernel_count"]) + 1
 
     if not step_kernel_times:
-        raise ValueError(f"kernel_details.csv contains no measured baseline kernels; ignored_blank_step_rows={ignored_blank_step_rows}")
+        raise ValueError("kernel_details.csv contains no measured visible NPU kernels")
 
     for window in step_windows.values():
         active_window = max(float(window["end_us"]) - float(window["start_us"]), 0.0)
@@ -585,6 +574,7 @@ def parse_baseline_active_window_csv(csv_path: Path) -> dict[str, object]:
 
     active_window_us = _median([float(window["device_active_window_us"]) for window in step_windows.values()])
     median_step_kernel_sum_us = _median([float(window["kernel_duration_sum_us"]) for window in step_windows.values()])
+    kernel_counts = sorted({int(window["kernel_count"]) for window in step_windows.values()})
 
     return {
         "device_kernels": device_kernels,
@@ -594,25 +584,20 @@ def parse_baseline_active_window_csv(csv_path: Path) -> dict[str, object]:
         "device_window_gap_us": round(max(active_window_us - median_step_kernel_sum_us, 0.0), 2),
         "step_windows": dict(sorted(step_windows.items(), key=lambda item: _step_sort_key(item[0]))),
         "measured_step_count": len(step_windows),
-        "ignored_blank_step_rows": ignored_blank_step_rows,
+        "kernel_count_pattern": kernel_counts,
     }
 
 
 def parse_cannbench_timing_csv(csv_path: Path, strategy: str) -> dict[str, object]:
     if strategy == "candidate_kernel_details":
-        parsed = parse_kernel_details_csv(csv_path)
-        return {
-            "latency_us": parsed["total_kernel_us"],
-            "device_kernels": parsed["device_kernels"],
-            "device_timeline": {"step_count": parsed["step_count"]},
-            "perf_metric_strategy": "kernel_details",
-            "measurement_scope": "visible_device_kernel_duration_sum",
-            "elapsed_us_source": "kernel_details.total_kernel_us",
-        }
-    if strategy == "baseline_active_window":
-        parsed = parse_baseline_active_window_csv(csv_path)
+        parsed = parse_visible_device_timing_csv(csv_path)
         return {
             "latency_us": parsed["device_active_window_us"],
+            "active_window_us": parsed["device_active_window_us"],
+            "kernel_sum_us": parsed["device_kernel_duration_sum_us"],
+            "window_gap_us": parsed["device_window_gap_us"],
+            "kernel_count": max(parsed["kernel_count_pattern"]) if parsed["kernel_count_pattern"] else None,
+            "step_count": parsed["measured_step_count"],
             "device_kernels": parsed["device_kernels"],
             "device_timeline": {
                 "device_active_window_us": parsed["device_active_window_us"],
@@ -620,12 +605,37 @@ def parse_cannbench_timing_csv(csv_path: Path, strategy: str) -> dict[str, objec
                 "median_step_kernel_duration_sum_us": parsed["median_step_kernel_duration_sum_us"],
                 "device_window_gap_us": parsed["device_window_gap_us"],
                 "measured_step_count": parsed["measured_step_count"],
-                "ignored_blank_step_rows": parsed["ignored_blank_step_rows"],
+                "kernel_count_pattern": parsed["kernel_count_pattern"],
+                "step_windows": parsed["step_windows"],
+            },
+            "perf_metric_strategy": "kernel_details",
+            "measurement_scope": "visible_device_active_window",
+            "elapsed_us_source": "kernel_details.active_window_us",
+            "kernel_sum_elapsed_us_source": "kernel_details.kernel_sum_us",
+        }
+    if strategy == "baseline_active_window":
+        parsed = parse_visible_device_timing_csv(csv_path)
+        return {
+            "latency_us": parsed["device_active_window_us"],
+            "active_window_us": parsed["device_active_window_us"],
+            "kernel_sum_us": parsed["device_kernel_duration_sum_us"],
+            "window_gap_us": parsed["device_window_gap_us"],
+            "kernel_count": max(parsed["kernel_count_pattern"]) if parsed["kernel_count_pattern"] else None,
+            "step_count": parsed["measured_step_count"],
+            "device_kernels": parsed["device_kernels"],
+            "device_timeline": {
+                "device_active_window_us": parsed["device_active_window_us"],
+                "device_kernel_duration_sum_us": parsed["device_kernel_duration_sum_us"],
+                "median_step_kernel_duration_sum_us": parsed["median_step_kernel_duration_sum_us"],
+                "device_window_gap_us": parsed["device_window_gap_us"],
+                "measured_step_count": parsed["measured_step_count"],
+                "kernel_count_pattern": parsed["kernel_count_pattern"],
                 "step_windows": parsed["step_windows"],
             },
             "perf_metric_strategy": "baseline_active_window",
             "measurement_scope": "visible_device_active_window",
             "elapsed_us_source": "baseline_active_window.device_active_window_us",
+            "kernel_sum_elapsed_us_source": "baseline_active_window.device_kernel_duration_sum_us",
         }
     raise ValueError(f"unsupported timing strategy: {strategy}")
 
@@ -773,6 +783,11 @@ def profile_once(
         if csv_path is None:
             return last_output, ProfileResult(
                 None,
+                None,
+                None,
+                None,
+                None,
+                None,
                 {},
                 {},
                 None,
@@ -785,6 +800,11 @@ def profile_once(
         if latency <= 0:
             return last_output, ProfileResult(
                 None,
+                None,
+                None,
+                None,
+                None,
+                None,
                 timing_data.get("device_kernels", {}),
                 timing_data.get("device_timeline", {}),
                 str(csv_path),
@@ -796,6 +816,11 @@ def profile_once(
             )
         return last_output, ProfileResult(
             latency,
+            float(timing_data["active_window_us"]) if timing_data.get("active_window_us") is not None else None,
+            float(timing_data["kernel_sum_us"]) if timing_data.get("kernel_sum_us") is not None else None,
+            float(timing_data["window_gap_us"]) if timing_data.get("window_gap_us") is not None else None,
+            int(timing_data["kernel_count"]) if timing_data.get("kernel_count") is not None else None,
+            int(timing_data["step_count"]) if timing_data.get("step_count") is not None else None,
             timing_data.get("device_kernels", {}),
             timing_data.get("device_timeline", {}),
             str(csv_path),
@@ -806,7 +831,7 @@ def profile_once(
             str(timing_data.get("elapsed_us_source", "")),
         )
     except Exception as exc:
-        return last_output, ProfileResult(None, {}, {}, None, None, f"{type(exc).__name__}: {exc}", timing_strategy)
+        return last_output, ProfileResult(None, None, None, None, None, None, {}, {}, None, None, f"{type(exc).__name__}: {exc}", timing_strategy)
 
 
 def _path_key(path: str) -> str:
@@ -877,7 +902,7 @@ def run_case(
         func = spec["fn"]
         assert callable(func)
         output = None
-        profile = ProfileResult(None, {}, {}, None, None, None)
+        profile = ProfileResult(None, None, None, None, None, None, {}, {}, None, None, None)
         if benchmark:
             output, profile = profile_once(
                 name,
@@ -922,8 +947,18 @@ def run_case(
             "perf_metric_strategy": profile.perf_metric_strategy,
             "measurement_scope": profile.measurement_scope,
             "elapsed_us_source": profile.elapsed_us_source,
+            "primary_latency_us": profile.latency_us,
+            "primary_latency": format_latency_us(profile.latency_us),
             "latency_us": profile.latency_us,
             "latency": format_latency_us(profile.latency_us),
+            "active_window_us": profile.active_window_us,
+            "active_window": format_latency_us(profile.active_window_us),
+            "kernel_sum_us": profile.kernel_sum_us,
+            "kernel_sum": format_latency_us(profile.kernel_sum_us),
+            "window_gap_us": profile.window_gap_us,
+            "window_gap": format_latency_us(profile.window_gap_us),
+            "kernel_count": profile.kernel_count,
+            "step_count": profile.step_count,
             "device_kernels": profile.device_kernels,
             "device_timeline": profile.device_timeline,
             "profiler_csv_path": profile.csv_path,
@@ -932,25 +967,24 @@ def run_case(
         }
 
     impls = result["implementations"]
-    triton_latency = impls["triton"]["latency_us"]
+    triton_active = impls["triton"]["active_window_us"]
+    triton_kernel = impls["triton"]["kernel_sum_us"]
     for base_name in ["torch", "torch_npu"]:
-        base_latency = impls[base_name]["latency_us"]
-        if triton_latency and base_latency:
-            impls[base_name]["speedup_vs_triton"] = float(base_latency) / float(triton_latency)
-            impls[base_name]["speedup_vs_triton_text"] = format_speedup(impls[base_name]["speedup_vs_triton"])
-        else:
-            impls[base_name]["speedup_vs_triton"] = None
-            impls[base_name]["speedup_vs_triton_text"] = "N/A"
+        base_active = impls[base_name]["active_window_us"]
+        base_kernel = impls[base_name]["kernel_sum_us"]
+        impls[base_name]["speedups_vs_triton"] = make_speedup_matrix(
+            triton_active,
+            triton_kernel,
+            base_active,
+            base_kernel,
+        )
+        impls[base_name]["speedup_vs_triton"] = impls[base_name]["speedups_vs_triton"]["active_vs_active"]
+        impls[base_name]["speedup_vs_triton_text"] = impls[base_name]["speedups_vs_triton"]["active_vs_active_text"]
     torch_npu_available = bool(
-        impls["torch_npu"]["accuracy"]["passed"] and impls["torch_npu"]["latency_us"]
+        impls["torch_npu"]["accuracy"]["passed"] and impls["torch_npu"]["active_window_us"]
     )
     selected_name = "torch_npu" if torch_npu_available else "torch"
-    selected_latency = impls[selected_name]["latency_us"]
-    selected_speedup = (
-        float(selected_latency) / float(triton_latency)
-        if triton_latency and selected_latency
-        else None
-    )
+    selected_speedups = impls[selected_name]["speedups_vs_triton"]
     result["selected_baseline"] = {
         "implementation": selected_name,
         "source": "task_npu_baseline_probe" if selected_name == "torch_npu" else "pytorch_semantic_baseline",
@@ -958,10 +992,15 @@ def run_case(
             "Use torch_npu.npu_add_rms_norm only when its output passes the same "
             "BF16 CANN-Bench precision check; otherwise use the Torch semantic baseline."
         ),
-        "latency_us": selected_latency,
-        "latency": format_latency_us(selected_latency),
-        "speedup_vs_triton": selected_speedup,
-        "speedup_vs_triton_text": format_speedup(selected_speedup),
+        "active_window_us": impls[selected_name]["active_window_us"],
+        "active_window": impls[selected_name]["active_window"],
+        "kernel_sum_us": impls[selected_name]["kernel_sum_us"],
+        "kernel_sum": impls[selected_name]["kernel_sum"],
+        "latency_us": impls[selected_name]["primary_latency_us"],
+        "latency": impls[selected_name]["primary_latency"],
+        "speedup_vs_triton": selected_speedups["active_vs_active"],
+        "speedup_vs_triton_text": selected_speedups["active_vs_active_text"],
+        "speedups_vs_triton": selected_speedups,
         "perf_metric_strategy": impls[selected_name]["perf_metric_strategy"],
         "measurement_scope": impls[selected_name]["measurement_scope"],
         "elapsed_us_source": impls[selected_name]["elapsed_us_source"],
@@ -978,46 +1017,31 @@ def print_case(record: dict[str, object], total: int) -> None:
     status = "PASS" if triton_acc["passed"] else "FAIL"
     print(
         f"[{status}] {record['case']:03d}/{total:03d} {record['kind']} shape={tuple(record['shape'])} "
-        f"triton={triton['latency']} torch={torch_impl['latency']} "
-        f"speedup_vs_torch={torch_impl['speedup_vs_triton_text']} "
-        f"torch_npu={torch_npu_impl['latency']} "
-        f"speedup_vs_torch_npu={torch_npu_impl['speedup_vs_triton_text']} "
+        f"triton_active={triton['active_window']} triton_kernel={triton['kernel_sum']} "
+        f"torch_active={torch_impl['active_window']} torch_kernel={torch_impl['kernel_sum']} "
+        f"torch_npu_active={torch_npu_impl['active_window']} torch_npu_kernel={torch_npu_impl['kernel_sum']} "
+        f"speedup_vs_torch_active={torch_impl['speedups_vs_triton']['active_vs_active_text']} "
+        f"speedup_vs_torch_kernel={torch_impl['speedups_vs_triton']['kernel_vs_kernel_text']} "
+        f"speedup_vs_torch_baseline_active_candidate_kernel={torch_impl['speedups_vs_triton']['baseline_active_vs_candidate_kernel_text']} "
+        f"speedup_vs_torch_baseline_kernel_candidate_active={torch_impl['speedups_vs_triton']['baseline_kernel_vs_candidate_active_text']} "
+        f"speedup_vs_torch_npu_active={torch_npu_impl['speedups_vs_triton']['active_vs_active_text']} "
+        f"speedup_vs_torch_npu_kernel={torch_npu_impl['speedups_vs_triton']['kernel_vs_kernel_text']} "
         f"triton_accuracy={'PASS' if triton_acc['passed'] else 'FAIL'} "
         f"torch_accuracy={'PASS' if torch_impl['accuracy']['passed'] else 'FAIL'} "
         f"torch_npu_accuracy={'PASS' if torch_npu_impl['accuracy']['passed'] else 'FAIL'} "
         f"MERE={triton_acc['mere']:.3e} MARE={triton_acc['mare']:.3e} "
         f"max_diff={triton_acc['max_diff']:.3e} "
         f"triton_source={triton['elapsed_us_source']} "
+        f"triton_kernel_source=kernel_details.kernel_sum_us "
         f"torch_source={torch_impl['elapsed_us_source']} "
-        f"torch_npu_source={torch_npu_impl['elapsed_us_source']}"
+        f"torch_kernel_source=baseline_active_window.device_kernel_duration_sum_us "
+        f"torch_npu_source={torch_npu_impl['elapsed_us_source']} "
+        f"torch_npu_kernel_source=baseline_active_window.device_kernel_duration_sum_us"
     )
 
 
 def summarize(records: list[dict[str, object]]) -> None:
     passed = sum(1 for r in records if r["implementations"]["triton"]["accuracy"]["passed"])
-    triton_latencies = [r["implementations"]["triton"]["latency_us"] for r in records]
-    torch_latencies = [r["implementations"]["torch"]["latency_us"] for r in records]
-    torch_npu_latencies = [r["implementations"]["torch_npu"]["latency_us"] for r in records]
-    triton_latencies = [float(v) for v in triton_latencies if v is not None]
-    torch_latencies = [float(v) for v in torch_latencies if v is not None]
-    torch_npu_latencies = [float(v) for v in torch_npu_latencies if v is not None]
-    speedups_torch = [
-        r["implementations"]["torch"]["speedup_vs_triton"]
-        for r in records
-        if r["implementations"]["torch"]["speedup_vs_triton"] is not None
-    ]
-    speedups_torch_npu = [
-        r["implementations"]["torch_npu"]["speedup_vs_triton"]
-        for r in records
-        if r["implementations"]["torch_npu"]["accuracy"]["passed"]
-        and r["implementations"]["torch_npu"]["speedup_vs_triton"] is not None
-    ]
-    selected_speedups = [
-        r["selected_baseline"]["speedup_vs_triton"]
-        for r in records
-        if r.get("selected_baseline")
-        and r["selected_baseline"]["speedup_vs_triton"] is not None
-    ]
     torch_npu_acc_pass = sum(1 for r in records if r["implementations"]["torch_npu"]["accuracy"]["passed"])
     torch_acc_pass = sum(1 for r in records if r["implementations"]["torch"]["accuracy"]["passed"])
     print(
@@ -1025,18 +1049,71 @@ def summarize(records: list[dict[str, object]]) -> None:
         f"torch_accuracy_pass={torch_acc_pass}/{len(records)} "
         f"torch_npu_accuracy_pass={torch_npu_acc_pass}/{len(records)} "
         f"selected_task_npu_baseline={torch_npu_acc_pass} selected_torch_fallback={len(records) - torch_npu_acc_pass} "
-        f"triton_strategy=kernel_details triton_scope=visible_device_kernel_duration_sum "
+        f"triton_strategy=kernel_details triton_scope=visible_device_active_window "
         f"baseline_strategy=baseline_active_window baseline_scope=visible_device_active_window"
     )
-    if triton_latencies:
+
+    def collect_impl(name: str, key: str, *, require_pass: bool = False) -> list[float]:
+        values: list[float] = []
+        for record in records:
+            impl = record["implementations"][name]
+            if require_pass and not impl["accuracy"]["passed"]:
+                continue
+            value = impl.get(key)
+            if value is not None:
+                values.append(float(value))
+        return values
+
+    def collect_speedups(base_name: str, key: str, *, require_pass: bool = False) -> list[float]:
+        values: list[float] = []
+        for record in records:
+            impl = record["implementations"][base_name]
+            if require_pass and not impl["accuracy"]["passed"]:
+                continue
+            value = impl["speedups_vs_triton"].get(key)
+            if value is not None:
+                values.append(float(value))
+        return values
+
+    def collect_selected(key: str) -> list[float]:
+        values: list[float] = []
+        for record in records:
+            selected = record.get("selected_baseline")
+            if selected:
+                value = selected["speedups_vs_triton"].get(key)
+                if value is not None:
+                    values.append(float(value))
+        return values
+
+    triton_active = collect_impl("triton", "active_window_us")
+    triton_kernel = collect_impl("triton", "kernel_sum_us")
+    torch_active = collect_impl("torch", "active_window_us")
+    torch_kernel = collect_impl("torch", "kernel_sum_us")
+    torch_npu_active = collect_impl("torch_npu", "active_window_us")
+    torch_npu_kernel = collect_impl("torch_npu", "kernel_sum_us")
+    if triton_active:
         print(
-            f"LATENCY triton_geomean={geomean(triton_latencies):.3f} us "
-            f"triton_min={min(triton_latencies):.3f} us triton_max={max(triton_latencies):.3f} us "
-            f"torch_geomean={geomean(torch_latencies):.3f} us "
-            f"torch_npu_geomean={geomean(torch_npu_latencies):.3f} us "
-            f"speedup_vs_torch_geomean={format_speedup(geomean(speedups_torch) if speedups_torch else None)} "
-            f"speedup_vs_torch_npu_pass_geomean={format_speedup(geomean(speedups_torch_npu) if speedups_torch_npu else None)} "
-            f"selected_baseline_speedup_geomean={format_speedup(geomean(selected_speedups) if selected_speedups else None)}"
+            f"LATENCY_ACTIVE triton_geomean={geomean(triton_active):.3f} us "
+            f"triton_min={min(triton_active):.3f} us triton_max={max(triton_active):.3f} us "
+            f"torch_geomean={geomean(torch_active):.3f} us "
+            f"torch_npu_geomean={geomean(torch_npu_active):.3f} us"
+        )
+        print(
+            f"LATENCY_KERNEL triton_geomean={geomean(triton_kernel):.3f} us "
+            f"triton_min={min(triton_kernel):.3f} us triton_max={max(triton_kernel):.3f} us "
+            f"torch_geomean={geomean(torch_kernel):.3f} us "
+            f"torch_npu_geomean={geomean(torch_npu_kernel):.3f} us"
+        )
+        print(
+            "SPEEDUP_MATRIX "
+            f"torch_active_vs_active={format_speedup(geomean(collect_speedups('torch', 'active_vs_active')))} "
+            f"torch_kernel_vs_kernel={format_speedup(geomean(collect_speedups('torch', 'kernel_vs_kernel')))} "
+            f"torch_baseline_active_vs_candidate_kernel={format_speedup(geomean(collect_speedups('torch', 'baseline_active_vs_candidate_kernel')))} "
+            f"torch_baseline_kernel_vs_candidate_active={format_speedup(geomean(collect_speedups('torch', 'baseline_kernel_vs_candidate_active')))} "
+            f"torch_npu_pass_active_vs_active={format_speedup(geomean(collect_speedups('torch_npu', 'active_vs_active', require_pass=True)))} "
+            f"torch_npu_pass_kernel_vs_kernel={format_speedup(geomean(collect_speedups('torch_npu', 'kernel_vs_kernel', require_pass=True)))} "
+            f"selected_active_vs_active={format_speedup(geomean(collect_selected('active_vs_active')))} "
+            f"selected_kernel_vs_kernel={format_speedup(geomean(collect_selected('kernel_vs_kernel')))}"
         )
 
 

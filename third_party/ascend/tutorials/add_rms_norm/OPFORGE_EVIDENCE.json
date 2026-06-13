@@ -1,89 +1,140 @@
 {
-  "source": "SLAI-Ascend-OpForge CANN-Bench custom AddRmsNorm evaluation",
-  "run_id": "eval_20260612_155910",
-  "agent_workspace": "/mnt/model/lcw/SLAI-Ascend-OpForge/runs/CANNBench_Custom_add_rms_norm/agents/triton-ascend",
-  "status": "PERF_REGRESSION",
-  "correct": 80,
-  "total": 80,
-  "failed": 0,
-  "score": 102.29032938011937,
-  "geomean_speedup": 8.269903861606247,
-  "min_speedup": 0.48507462686567165,
-  "mean_latency_us": 56.786125,
-  "median_latency_us": 15.55,
-  "p95_latency_us": 225.16599999999977,
-  "baseline_source_counts": {
-    "task_npu_baseline": 21,
-    "pytorch_fallback": 59
-  },
-  "speedup_by_baseline_source": {
-    "task_npu_baseline": {
-      "n": 21,
-      "geomean_speedup": 3.356044756270969,
-      "mean_speedup": 5.218322732625236,
-      "min_speedup": 0.48507462686567165,
-      "max_speedup": 21.716638513513512
-    },
-    "pytorch_fallback": {
-      "n": 59,
-      "geomean_speedup": 11.400119243334245,
-      "mean_speedup": 17.89928830021203,
-      "min_speedup": 1.8701171875,
-      "max_speedup": 63.32599118942731
-    }
-  },
   "accuracy": {
     "dtype": "bfloat16",
-    "threshold": 0.0078125,
-    "public_cases_passed": 80,
-    "public_cases_failed": 0,
-    "total_mismatch_count": 0,
+    "max_diff": 0.015625,
     "max_mare": 0.007812499609375021,
-    "max_diff": 0.015625
+    "public_cases_failed": 0,
+    "public_cases_passed": 80,
+    "threshold": 0.0078125,
+    "total_mismatch_count": 0
   },
-  "generalization_audit": {
-    "run_id": "manual_generalization_audit_40_fixed_20260612_155512",
-    "case_count": 40,
-    "failed_count": 0,
-    "status": "passed"
+  "agent_workspace": "/mnt/model/lcw/SLAI-Ascend-OpForge/runs/CANNBench_Custom_add_rms_norm/agents/triton-ascend",
+  "baseline_source_counts": {
+    "pytorch_fallback": 59,
+    "task_npu_baseline": 21
   },
-  "delivery_self_validation": {
-    "source_jsonl": "logs/add_rms_norm_cannbench_aligned_20260612.jsonl",
-    "source_log": "logs/add_rms_norm_cannbench_aligned_20260612.log",
-    "public_cases": 80,
-    "triton_accuracy_passed": 80,
-    "torch_accuracy_passed": 80,
-    "torch_npu_accuracy_passed": 61,
-    "selected_baseline_counts": {
-      "task_npu_baseline_probe": 61,
-      "pytorch_semantic_baseline": 19
-    },
-    "timing_strategy": {
-      "triton": {
-        "perf_metric_strategy": "kernel_details",
-        "measurement_scope": "visible_device_kernel_duration_sum",
-        "elapsed_us_source": "kernel_details.total_kernel_us"
-      },
+  "correct": 80,
+  "delivery_timing_matrix": {
+    "latency_geomean_us": {
       "torch": {
-        "perf_metric_strategy": "baseline_active_window",
-        "measurement_scope": "visible_device_active_window",
-        "elapsed_us_source": "baseline_active_window.device_active_window_us"
+        "active_window": 343.63889217194367,
+        "kernel_sum": 106.45126306202432
       },
       "torch_npu": {
-        "perf_metric_strategy": "baseline_active_window",
-        "measurement_scope": "visible_device_active_window",
-        "elapsed_us_source": "baseline_active_window.device_active_window_us"
+        "active_window": 209.04288156815613,
+        "kernel_sum": 209.13553583714133
+      },
+      "triton": {
+        "active_window": 47.855488318831725,
+        "kernel_sum": 20.17954437884049
       }
     },
-    "triton_geomean_us": 19.941828,
-    "torch_geomean_us": 343.638892,
-    "torch_npu_geomean_us_all_timed": 209.042882,
-    "speedup_vs_torch_geomean": 17.232065,
-    "speedup_vs_torch_npu_pass_geomean": 9.963093,
-    "selected_baseline_speedup_geomean": 11.319563
+    "public_cases": 80,
+    "selected_baseline_counts": {
+      "pytorch_semantic_baseline": 19,
+      "task_npu_baseline_probe": 61
+    },
+    "source_jsonl": "logs/add_rms_norm_timing_matrix_20260613.jsonl",
+    "source_log": "logs/add_rms_norm_timing_matrix_20260613.log",
+    "source_summary_json": "logs/add_rms_norm_timing_matrix_20260613.summary.json",
+    "speedup_geomean": {
+      "selected_active_vs_active": 4.716967513908443,
+      "selected_baseline_active_vs_candidate_kernel": 11.186218059454774,
+      "selected_baseline_kernel_vs_candidate_active": 3.583668705753481,
+      "selected_kernel_vs_kernel": 8.498616850169082,
+      "torch_active_vs_active_accuracy_pass": 7.180762421281508,
+      "torch_active_vs_active_all_timed": 7.180762421281508,
+      "torch_baseline_active_vs_candidate_kernel_accuracy_pass": 17.02907091065297,
+      "torch_baseline_active_vs_candidate_kernel_all_timed": 17.02907091065297,
+      "torch_baseline_kernel_vs_candidate_active_accuracy_pass": 2.2244316545848375,
+      "torch_baseline_kernel_vs_candidate_active_all_timed": 2.2244316545848375,
+      "torch_kernel_vs_kernel_accuracy_pass": 5.275206469658706,
+      "torch_kernel_vs_kernel_all_timed": 5.275206469658706,
+      "torch_npu_active_vs_active_accuracy_pass": 3.2716965701858887,
+      "torch_npu_active_vs_active_all_timed": 4.368211231602766,
+      "torch_npu_baseline_active_vs_candidate_kernel_accuracy_pass": 9.809041696380321,
+      "torch_npu_baseline_active_vs_candidate_kernel_all_timed": 10.359147741083323,
+      "torch_npu_baseline_kernel_vs_candidate_active_accuracy_pass": 3.2732005108525066,
+      "torch_npu_baseline_kernel_vs_candidate_active_all_timed": 4.370147357891325,
+      "torch_npu_kernel_vs_kernel_accuracy_pass": 9.813550738215742,
+      "torch_npu_kernel_vs_kernel_all_timed": 10.363739235680333
+    },
+    "timing_source_notes": {
+      "candidate": "Triton active-window and kernel-sum were recovered from evaluator-owned eval_20260612_155910 candidate kernel_details/profile probe and normalized into this compact JSONL.",
+      "strict_csv_policy": "Current validate_add_rms_norm.py fails fast on missing Start Time(us), missing Step Id, or blank Step Id; malformed profiler CSV is not scored.",
+      "torch_and_torch_npu": "Torch semantic and torch_npu active-window/kernel-sum were normalized from delivery baseline_active_window profiler results into this compact JSONL."
+    },
+    "torch_accuracy_passed": 80,
+    "torch_npu_accuracy_passed": 61,
+    "triton_accuracy_passed": 80
+  },
+  "failed": 0,
+  "generalization_audit": {
+    "case_count": 40,
+    "failed_count": 0,
+    "run_id": "manual_generalization_audit_40_fixed_20260612_155512",
+    "status": "passed"
   },
   "important_limitations": [
-    "Only 21 of 80 calibrated baselines used torch_npu.npu_add_rms_norm. The other 59 used PyTorch semantic fallback because the public NPU baseline did not validate numerically for those cases.",
-    "The public CANN-Bench status is PERF_REGRESSION because some small cases remain below the performance threshold."
-  ]
+    "torch_npu.npu_add_rms_norm is treated as a partial NPU helper/probe: it passes the same BF16 precision check on 61 of 80 public cases, while the Torch semantic path covers 80 of 80 cases.",
+    "The current private evaluator status is PERF_REGRESSION because some small cases remain below the performance threshold under the evaluator baseline selection.",
+    "The validation script fails fast on missing Start Time(us), missing Step Id, or blank Step Id in profiler CSV; no compatibility fallback is kept for malformed profiler timing input."
+  ],
+  "legacy_summary_geomean_speedup": 8.269903861606247,
+  "legacy_summary_latency_us": {
+    "mean": 56.786125,
+    "median": 15.55,
+    "p95": 225.16599999999977
+  },
+  "legacy_summary_min_speedup": 0.48507462686567165,
+  "legacy_summary_speedup_note": "The stored eval_20260612_155910 summary was produced before the active-window score refactor and reports the earlier candidate kernel-sum geomean speedup field. The delivery timing matrix below is the current comparison view.",
+  "run_id": "eval_20260612_155910",
+  "score": 102.29032938011937,
+  "source": "SLAI-Ascend-OpForge private CANN-Bench AddRmsNorm evaluation and delivery timing matrix",
+  "speedup_by_baseline_source_legacy_summary": {
+    "pytorch_fallback": {
+      "geomean_speedup": 11.400119243334245,
+      "max_speedup": 63.32599118942731,
+      "mean_speedup": 17.89928830021203,
+      "min_speedup": 1.8701171875,
+      "n": 59
+    },
+    "task_npu_baseline": {
+      "geomean_speedup": 3.356044756270969,
+      "max_speedup": 21.716638513513512,
+      "mean_speedup": 5.218322732625236,
+      "min_speedup": 0.48507462686567165,
+      "n": 21
+    }
+  },
+  "status": "PERF_REGRESSION",
+  "timing_policy": {
+    "candidate": {
+      "active_window_source": "kernel_details.active_window_us normalized in timing matrix",
+      "kernel_sum_source": "kernel_details.kernel_sum_us normalized in timing matrix",
+      "measurement_scope": "visible_device_active_window",
+      "perf_metric_strategy": "kernel_details"
+    },
+    "diagnostic_scope": "kernel_sum_us",
+    "primary_score_scope": "active_window_us",
+    "speedup_matrix_fields": {
+      "active_vs_active": "main comparison: baseline active-window / candidate active-window",
+      "baseline_active_vs_candidate_kernel": "diagnostic: baseline active-window / candidate kernel-sum",
+      "baseline_kernel_vs_candidate_active": "diagnostic: baseline kernel-sum / candidate active-window",
+      "kernel_vs_kernel": "diagnostic: baseline kernel-sum / candidate kernel-sum"
+    },
+    "torch": {
+      "active_window_source": "baseline_active_window.device_active_window_us",
+      "kernel_sum_source": "baseline_active_window.device_kernel_duration_sum_us",
+      "measurement_scope": "visible_device_active_window",
+      "perf_metric_strategy": "baseline_active_window"
+    },
+    "torch_npu": {
+      "active_window_source": "baseline_active_window.device_active_window_us",
+      "kernel_sum_source": "baseline_active_window.device_kernel_duration_sum_us",
+      "measurement_scope": "visible_device_active_window",
+      "perf_metric_strategy": "baseline_active_window"
+    }
+  },
+  "total": 80
 }
