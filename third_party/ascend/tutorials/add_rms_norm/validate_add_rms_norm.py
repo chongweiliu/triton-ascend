@@ -10,6 +10,7 @@ import json
 import logging
 import math
 import os
+import random
 import shutil
 import tempfile
 import time
@@ -51,6 +52,11 @@ PUBLIC_BH_SHAPES = [
 ]
 
 PUBLIC_SEQUENCE_LENGTHS = [1, 8, 32, 128]
+DEFAULT_VALUE_RANGES = ((-1.0, 1.0), (-1.0, 1.0), (0.5, 1.5))
+RANDOM_GENERALIZATION_POLICY = "seeded_non_public_bsh_v1"
+RANDOM_MAX_ELEMENTS = 8 * 1024 * 1024
+RANDOM_B_CANDIDATES = [1, 2, 3, 4, 5, 7, 8, 12, 16, 24, 32, 48, 64]
+RANDOM_S_CANDIDATES = [1, 2, 3, 5, 7, 8, 16, 31, 32, 33, 64, 96, 127, 128]
 BF16_THRESHOLD = 2**-7
 BF16_SMALL_VALUE_THRESHOLD = 2**-8
 BF16_SMALL_VALUE_ERROR = 2**-16
@@ -70,6 +76,13 @@ class Case:
     seq: int
     hidden: int
     kind: str = "public"
+    case_id: str | None = None
+    case_seed: int | None = None
+    audit_seed: int | None = None
+    shape_policy: str = ""
+    random_category: str = ""
+    note: str = ""
+    value_ranges: tuple[tuple[float, float], tuple[float, float], tuple[float, float]] = DEFAULT_VALUE_RANGES
 
     @property
     def shape(self) -> tuple[int, int, int]:
@@ -101,42 +114,110 @@ def public_cases() -> list[Case]:
     return [Case(bsz, seq, hidden) for seq in PUBLIC_SEQUENCE_LENGTHS for bsz, hidden in PUBLIC_BH_SHAPES]
 
 
-def generalization_cases() -> list[Case]:
-    return [
-        Case(1, 3, 64, "boundary"),
-        Case(2, 5, 257, "boundary"),
-        Case(7, 2, 3584, "near-public"),
-        Case(8, 3, 4097, "near-public"),
-        Case(16, 5, 5130, "near-public"),
-        Case(32, 2, 8064, "near-public"),
-        Case(1, 32, 8320, "near-public"),
-        Case(16, 128, 8320, "near-public"),
-        Case(64, 1, 8192, "boundary"),
-        Case(5, 33, 4608, "near-public"),
-    ]
+def random_generalization_cases(
+    count: int,
+    seed: int,
+    *,
+    policy: str = RANDOM_GENERALIZATION_POLICY,
+) -> list[Case]:
+    if count < 0:
+        raise ValueError("random generalization count must be non-negative")
+    if policy != RANDOM_GENERALIZATION_POLICY:
+        raise ValueError(f"unsupported random shape policy: {policy}")
+
+    rng = random.Random(int(seed))
+    public_shapes = {case.shape for case in public_cases()}
+    seen: set[tuple[int, int, int]] = set()
+    cases: list[Case] = []
+    attempts = 0
+    max_attempts = max(200, count * 200)
+
+    while len(cases) < count and attempts < max_attempts:
+        attempts += 1
+        category = rng.choice(["near_hidden", "contract_shape", "wide_hidden", "small_tail"])
+        if category == "near_hidden":
+            base_bsz, base_hidden = rng.choice(PUBLIC_BH_SHAPES)
+            base_seq = rng.choice(PUBLIC_SEQUENCE_LENGTHS)
+            hidden_delta = rng.choice([-384, -257, -128, -64, 64, 127, 192, 256, 384])
+            bsz, seq, hidden = base_bsz, base_seq, max(1, base_hidden + hidden_delta)
+        elif category == "wide_hidden":
+            bsz = rng.choice([1, 2, 4, 8, 16])
+            seq = rng.choice([1, 2, 4, 8, 16, 32])
+            hidden = rng.randint(8193, 12288)
+        elif category == "small_tail":
+            bsz = rng.choice([1, 2, 3, 5, 8, 13, 16])
+            seq = rng.choice([1, 2, 3, 5, 7, 11, 17, 31, 33])
+            hidden = rng.randint(1, 1024)
+        else:
+            bsz = rng.choice(RANDOM_B_CANDIDATES)
+            seq = rng.choice(RANDOM_S_CANDIDATES)
+            hidden = rng.randint(64, 8192)
+
+        shape = (bsz, seq, hidden)
+        if shape in public_shapes or shape in seen:
+            continue
+        if bsz * seq * hidden > RANDOM_MAX_ELEMENTS:
+            continue
+
+        seen.add(shape)
+        random_index = len(cases) + 1
+        case_id = f"custom/add_rms_norm_random_{random_index:03d}"
+        cases.append(
+            Case(
+                bsz,
+                seq,
+                hidden,
+                kind="random_generalization",
+                case_id=case_id,
+                case_seed=_seed_from_case_id(case_id, int(seed)),
+                audit_seed=int(seed),
+                shape_policy=policy,
+                random_category=category,
+                note="seeded non-public random shape sample",
+            )
+        )
+
+    if len(cases) != count:
+        raise RuntimeError(f"generated {len(cases)} random cases after {attempts} attempts, expected {count}")
+    return cases
 
 
 def _cannbench_case_id(index: int) -> str:
     return f"custom/add_rms_norm_{index}"
 
 
-def _cannbench_case_seed(index: int, eval_seed: int = 0) -> int:
-    digest = hashlib.sha256(_cannbench_case_id(index).encode("utf-8")).digest()
+def _seed_from_case_id(case_id: str, eval_seed: int = 0) -> int:
+    digest = hashlib.sha256(case_id.encode("utf-8")).digest()
     deterministic_hash = int.from_bytes(digest[:8], byteorder="big") % (2**31)
     return (int(eval_seed) + deterministic_hash) % (2**31)
 
 
-def _gen_bf16_uniform(shape: tuple[int, int, int], min_val: float, max_val: float, gen: torch.Generator) -> torch.Tensor:
+def _cannbench_case_seed(index: int, eval_seed: int = 0) -> int:
+    return _seed_from_case_id(_cannbench_case_id(index), eval_seed)
+
+
+def _gen_bf16_uniform(
+    shape: tuple[int, int, int],
+    min_val: float,
+    max_val: float,
+    gen: torch.Generator,
+) -> torch.Tensor:
     tensor_f64 = torch.rand(shape, dtype=torch.float64, generator=gen) * (max_val - min_val) + min_val
     return tensor_f64.to(torch.bfloat16)
 
 
-def make_inputs(shape: tuple[int, int, int], case_index: int, device: str) -> tuple[torch.Tensor, ...]:
+def make_inputs(
+    shape: tuple[int, int, int],
+    case_seed: int,
+    device: str,
+    value_ranges: tuple[tuple[float, float], tuple[float, float], tuple[float, float]] = DEFAULT_VALUE_RANGES,
+) -> tuple[torch.Tensor, ...]:
     gen = torch.Generator()
-    gen.manual_seed(_cannbench_case_seed(case_index))
-    x1_cpu = _gen_bf16_uniform(shape, -1.0, 1.0, gen)
-    x2_cpu = _gen_bf16_uniform(shape, -1.0, 1.0, gen)
-    gamma_cpu = _gen_bf16_uniform(shape, 0.5, 1.5, gen)
+    gen.manual_seed(int(case_seed))
+    x1_range, x2_range, gamma_range = value_ranges
+    x1_cpu = _gen_bf16_uniform(shape, x1_range[0], x1_range[1], gen)
+    x2_cpu = _gen_bf16_uniform(shape, x2_range[0], x2_range[1], gen)
+    gamma_cpu = _gen_bf16_uniform(shape, gamma_range[0], gamma_range[1], gen)
     return (
         x1_cpu.to(device=device).contiguous(),
         x2_cpu.to(device=device).contiguous(),
@@ -841,7 +922,6 @@ def _path_key(path: str) -> str:
 def run_case(
     case: Case,
     index: int,
-    seed: int,
     device: str,
     benchmark: bool,
     warmup: int,
@@ -852,8 +932,9 @@ def run_case(
     profiler_export_type: str,
     freq_boost: bool,
 ) -> dict[str, object]:
-    del seed
-    x1, x2, gamma = make_inputs(case.shape, index, device)
+    case_id = case.case_id or _cannbench_case_id(index)
+    case_seed = case.case_seed if case.case_seed is not None else _cannbench_case_seed(index)
+    x1, x2, gamma = make_inputs(case.shape, case_seed, device, case.value_ranges)
     cpu_x1 = x1.cpu()
     cpu_x2 = x2.cpu()
     cpu_gamma = gamma.cpu()
@@ -884,19 +965,27 @@ def run_case(
 
     result: dict[str, object] = {
         "case": index,
-        "case_id": _cannbench_case_id(index),
-        "case_seed": _cannbench_case_seed(index),
+        "case_id": case_id,
+        "case_seed": case_seed,
         "kind": case.kind,
         "shape": list(case.shape),
         "dtype": "bfloat16",
         "threshold": BF16_THRESHOLD,
-        "value_range": [[-1.0, 1.0], [-1.0, 1.0], [0.5, 1.5]],
+        "value_range": [list(item) for item in case.value_ranges],
         "timing_policy": (
             "Triton candidate uses CANN-Bench KernelDetailsStrategy; "
             "Torch semantic and torch_npu baselines use custom-baseline BaselineActiveWindowStrategy."
         ),
         "implementations": {},
     }
+    if case.audit_seed is not None:
+        result["audit_seed"] = case.audit_seed
+    if case.shape_policy:
+        result["shape_policy"] = case.shape_policy
+    if case.random_category:
+        result["random_category"] = case.random_category
+    if case.note:
+        result["note"] = case.note
 
     for name, spec in implementations.items():
         func = spec["fn"]
@@ -1052,6 +1141,11 @@ def summarize(records: list[dict[str, object]]) -> None:
         f"triton_strategy=kernel_details triton_scope=visible_device_active_window "
         f"baseline_strategy=baseline_active_window baseline_scope=visible_device_active_window"
     )
+    kinds = sorted({str(r["kind"]) for r in records})
+    for kind in kinds:
+        kind_records = [r for r in records if r["kind"] == kind]
+        kind_passed = sum(1 for r in kind_records if r["implementations"]["triton"]["accuracy"]["passed"])
+        print(f"SUMMARY_KIND kind={kind} passed={kind_passed}/{len(kind_records)}")
 
     def collect_impl(name: str, key: str, *, require_pass: bool = False) -> list[float]:
         values: list[float] = []
@@ -1121,7 +1215,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Validate AddRmsNorm Triton-Ascend implementation.")
     parser.add_argument("--device", default="npu", help="Torch device, default: npu")
     parser.add_argument("--public", action="store_true", help="Run all 80 public B/S/H cases.")
-    parser.add_argument("--generalization", action="store_true", help="Run additional non-public shape cases.")
+    parser.add_argument("--random-generalization", type=int, default=0, help="Run N seeded random non-public shape cases.")
+    parser.add_argument("--random-seed", type=int, default=20260613, help="Seed for random generalization shapes and values.")
+    parser.add_argument("--random-shape-policy", default=RANDOM_GENERALIZATION_POLICY, help="Random generalization shape policy.")
     parser.add_argument("--benchmark", action="store_true", help="Use CANN-Bench-style profiler timing.")
     parser.add_argument("--warmup", type=int, default=3)
     parser.add_argument("--repeat", type=int, default=5)
@@ -1136,12 +1232,20 @@ def main() -> None:
 
     if torch_npu is None:
         raise RuntimeError("torch_npu is required for NPU validation")
+    if args.random_generalization < 0:
+        parser.error("--random-generalization must be non-negative")
 
     selected: list[Case] = []
-    if args.public or not args.generalization:
+    if args.public or args.random_generalization == 0:
         selected.extend(public_cases())
-    if args.generalization:
-        selected.extend(generalization_cases())
+    if args.random_generalization:
+        selected.extend(
+            random_generalization_cases(
+                args.random_generalization,
+                args.random_seed,
+                policy=args.random_shape_policy,
+            )
+        )
     if args.max_cases is not None:
         selected = selected[: args.max_cases]
 
@@ -1156,7 +1260,6 @@ def main() -> None:
         record = run_case(
             case,
             index,
-            20260612 + index - 1,
             args.device,
             args.benchmark,
             args.warmup,

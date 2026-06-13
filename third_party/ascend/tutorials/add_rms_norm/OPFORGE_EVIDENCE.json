@@ -69,16 +69,11 @@
     "triton_accuracy_passed": 80
   },
   "failed": 0,
-  "generalization_audit": {
-    "case_count": 40,
-    "failed_count": 0,
-    "run_id": "manual_generalization_audit_40_fixed_20260612_155512",
-    "status": "passed"
-  },
   "important_limitations": [
     "torch_npu.npu_add_rms_norm is treated as a partial NPU helper/probe: it passes the same BF16 precision check on 61 of 80 public cases, while the Torch semantic path covers 80 of 80 cases.",
     "The current private evaluator status is PERF_REGRESSION because some small cases remain below the performance threshold under the evaluator baseline selection.",
-    "The validation script fails fast on missing Start Time(us), missing Step Id, or blank Step Id in profiler CSV; no compatibility fallback is kept for malformed profiler timing input."
+    "The delivery random generalization set is fixed-seed correctness evidence; it does not replace the 80 public timing matrix for performance claims.",
+    "The legacy 10 hand-written near-public/boundary validation log was removed; validate_add_rms_norm.py now uses --random-generalization and has no --generalization compatibility flag."
   ],
   "legacy_summary_geomean_speedup": 8.269903861606247,
   "legacy_summary_latency_us": {
@@ -136,5 +131,38 @@
       "perf_metric_strategy": "baseline_active_window"
     }
   },
-  "total": 80
+  "total": 80,
+  "opforge_fixed_seed_generalization_audit": {
+    "case_count": 40,
+    "failed_count": 0,
+    "run_id": "manual_generalization_audit_40_fixed_20260612_155512",
+    "status": "passed"
+  },
+  "delivery_random_generalization": {
+    "source_jsonl": "logs/add_rms_norm_random_generalization_20260613.jsonl",
+    "source_log": "logs/add_rms_norm_random_generalization_20260613.log",
+    "source_summary_json": "logs/add_rms_norm_random_generalization_20260613.summary.json",
+    "random_seed": 20260613,
+    "shape_policy": "seeded_non_public_bsh_v1",
+    "public_cases": 80,
+    "random_generalization_cases": 40,
+    "public_triton_passed": 80,
+    "random_triton_passed": 40,
+    "random_max_mare": 0.007812499218750078,
+    "random_max_diff": 0.015625,
+    "random_category_counts": {
+      "contract_shape": 8,
+      "near_hidden": 12,
+      "small_tail": 9,
+      "wide_hidden": 11
+    }
+  },
+  "evidence_files": {
+    "public_timing_matrix_jsonl": "logs/add_rms_norm_timing_matrix_20260613.jsonl",
+    "public_timing_matrix_log": "logs/add_rms_norm_timing_matrix_20260613.log",
+    "public_timing_matrix_summary": "logs/add_rms_norm_timing_matrix_20260613.summary.json",
+    "public_and_random_validation_jsonl": "logs/add_rms_norm_random_generalization_20260613.jsonl",
+    "public_and_random_validation_log": "logs/add_rms_norm_random_generalization_20260613.log",
+    "public_and_random_validation_summary": "logs/add_rms_norm_random_generalization_20260613.summary.json"
+  }
 }

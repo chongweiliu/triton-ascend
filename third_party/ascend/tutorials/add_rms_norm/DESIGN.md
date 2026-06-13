@@ -21,7 +21,7 @@ add_rms_norm(x1: Tensor, x2: Tensor, gamma: Tensor, epsilon: float = 1e-6) -> Te
 
 ## 3. 形状覆盖与分发
 
-公开风格验证覆盖 80 个 case：`B in {1,8,16,32,64}`、`S in {1,8,32,128}`、`H in {3584,4096,5120,8192}`。实现不硬编码公开 case id，也不读取 workload 文件名。
+公开风格验证覆盖 80 个 case：`B in {1,8,16,32,64}`、`S in {1,8,32,128}`、`H in {3584,4096,5120,8192}`。交付正确性验证还包含固定 seed 随机生成的 40 个非公开 shape case。实现不硬编码公开 case id、随机 case id，也不读取 workload 文件名。
 
 - `H <= 4096`：单个融合 Triton kernel。
 - `4096 < H` 且 `next_power_of_2(H) <= 8192`：两个 Triton kernel，先算 FP32 `rstd`，再 apply。
@@ -34,6 +34,8 @@ add_rms_norm(x1: Tensor, x2: Tensor, gamma: Tensor, epsilon: float = 1e-6) -> Te
 ## 5. 精度设计
 
 验证脚本复刻 BF16 检查口径：阈值 `2^-7 = 0.0078125`，普通位置要求 `MERE < threshold` 且 `MARE < 10 * threshold`，小值或抵消位置使用 checker 的 ErrorCount 规则。`eval_20260612_155910` 显示 80/80 公开 case 精度通过，mismatch 总数为 0，最大 MARE 为 `0.007812499609375021`，最大 diff 为 `0.015625`。
+
+当前交付目录的 `logs/add_rms_norm_random_generalization_20260613.jsonl` 记录了 80 个 public case 加 40 个 fixed-seed random generalization case，Triton 候选为 120/120 通过，其中 random generalization 为 40/40 通过。旧的 10 个手写 near-public/boundary case 已从脚本和报告中删除。
 
 ## 6. 无 fallback 边界
 
@@ -66,4 +68,5 @@ add_rms_norm(x1: Tensor, x2: Tensor, gamma: Tensor, epsilon: float = 1e-6) -> Te
 
 - 小尺寸双 kernel case 的 active-window 受 kernel 间隙影响明显，例如 case 3 的 kernel-sum 为 `6.700 us`，active-window 为 `121.500 us`。
 - `torch_npu` helper 只在 61/80 个 case 上通过同一 BF16 精度检查，不能作为 80 case 全覆盖基线。
+- random generalization 只作为正确性泛化证据，不替代 80 public timing matrix 的性能统计。
 - 当前状态仍为 `PERF_REGRESSION`，后续优化重点是小尺寸 active-window 和双 kernel 路径的 launch/gap。
