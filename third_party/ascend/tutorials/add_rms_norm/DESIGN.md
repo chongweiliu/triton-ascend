@@ -150,7 +150,7 @@ Speedup vs torch_npu helper 在 helper 精度通过的 61 个用例上 geomean �
 
 ## 8. 风险与后续工作
 
-- 在最终 HiDevLab/Triton-Ascend 环境中重新运行验证，并按评审流程补充原始日志和截图。
+- 在最终 HiDevLab/Triton-Ascend 环境中重新运行验证，并按评审流程保留原始日志证据。
 - 继续优化小尺寸性能。当前 OpForge 状态为 `PERF_REGRESSION`，原因是部分小尺寸用例
   低于性能阈值。
 - 当前 clean `PASSED` 状态的主要阻塞点是低于 1x 的小尺寸用例。

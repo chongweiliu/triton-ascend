@@ -243,4 +243,4 @@ python3 validate_add_rms_norm.py --public --benchmark --warmup 3 --repeat 5 \
 
 - 当前 OpForge 聚合状态为 `PERF_REGRESSION`，不是 `PASSED`，原因是部分小尺寸用例
   最小 speedup 低于 1.0。
-- 正式提交时建议补充从交付目录直接运行得到的 HiDevLab 日志、截图和性能数据截图。
+- 正式提交时以交付目录直接运行得到的 HiDevLab 日志和 xlsx 内嵌日志证据为准。
