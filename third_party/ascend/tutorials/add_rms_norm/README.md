@@ -21,8 +21,8 @@
 - `AddRmsNorm算子设计方案.docx`：设计方案模板填充件。
 - `AddRmsNorm算子自验证报告.xlsx`：80 public 自验证表和随机泛化工作表。
 - `OPFORGE_EVIDENCE.json`：结构化证据副本。
-- `logs/add_rms_norm_timing_matrix_20260613.jsonl`：当前规范三路 timing matrix。
-- `logs/add_rms_norm_random_generalization_20260613.jsonl`：80 public 加 40 random generalization 的正确性验证记录。
+- `logs/add_rms_norm_timing_matrix_20260615.jsonl`：本地 delivery benchmark 日志，精度完整，严格 profiler CSV 解析会把坏 Step Id 行记录为 `N/A`。
+- `logs/add_rms_norm_random_generalization_20260615.jsonl`：80 public 加 40 random generalization 的正确性验证记录。
 
 ## 运行验证
 
@@ -33,51 +33,34 @@ python3 validate_add_rms_norm.py --public --random-generalization 40 --random-se
 三路性能采集命令：
 
 ```bash
-python3 validate_add_rms_norm.py --public --benchmark --warmup 3 --repeat 5 \
-  --jsonl logs/add_rms_norm_timing_matrix_$(date +%Y%m%d_%H%M%S).jsonl \
-  --profiler-data-dir logs/prof_data_timing_matrix
+python3 validate_add_rms_norm.py --public --benchmark --warmup 3 --repeat 5   --jsonl logs/add_rms_norm_timing_matrix_$(date +%Y%m%d_%H%M%S).jsonl   --profiler-data-dir logs/prof_data_timing_matrix
 ```
 
-当前脚本不保留旧 profiler CSV 兼容路径：`kernel_details.csv` 缺 `Start Time(us)`、缺 `Step Id` 或存在空 `Step Id` 时直接报错，避免把不完整 profiler 数据继续纳入计分或报告。
+正确性日志不采集 profiler，所以 `active=N/A` 是预期现象。需要非 `N/A` 的 timing 字段必须加 `--benchmark`。如果 benchmark 日志仍出现 `N/A`，含义是对应 profiler CSV 未通过严格解析；本次 `20260615` delivery benchmark 中候选 cases 75-80 因 blank `Step Id` 被拒绝，官方 OpForge traces 仍提供完整 80 case 计时。
 
 ## 计时口径
 
-当前主比较使用 **active-window**：每个 Step Id 内可见 NPU kernel 的 `max(end)-min(start)`，case 时间取 measured step 的中位数。`kernel-sum` 仍保留为诊断：按 kernel 名称聚合每步 duration 后取中位并求和。
-
-三路都报告两个时间：
-
-| 路径 | active-window | kernel-sum | 用途 |
-|---|---|---|---|
-| Triton 候选 | `opforge_probe.kernel_details.active_window_us` | `opforge_probe.kernel_details.kernel_sum_us` | active-window 是主口径 |
-| Torch 语义实现 | `baseline_active_window.device_active_window_us` | `baseline_active_window.device_kernel_duration_sum_us` | active-window 是主基线 |
-| `torch_npu.npu_add_rms_norm` helper | `baseline_active_window.device_active_window_us` | `baseline_active_window.device_kernel_duration_sum_us` | 只在精度通过子集作为 NPU helper 基线 |
+当前主比较使用 **active-window**：每个 Step Id 内可见 NPU kernel 的 `max(end)-min(start)`，case 时间取 measured step 的中位数。`kernel-sum` 只作为诊断字段。性能主证据来自 OpForge `eval_20260615_154048` 的 `timing_artifacts/main_results.csv` 和 `summary.json`。
 
 ## 当前证据
 
-OpForge 评测器记录 `eval_20260612_155910`：80/80 正确，状态 `PERF_REGRESSION`。该历史 summary 是 active-window 重构前生成的字段，交付报告中的当前性能比较以 `logs/add_rms_norm_timing_matrix_20260613.*` 为准。当前交付正确性补充记录为 `logs/add_rms_norm_random_generalization_20260613.*`：80/80 public 通过，40/40 fixed-seed random generalization 通过。
-
 | 指标 | 数值 |
 | --- | --- |
-| Triton 候选 active-window geomean | 47.855 us |
-| Triton 候选 kernel-sum geomean | 20.180 us |
-| Torch 语义 active-window geomean | 343.639 us |
-| Torch 语义 kernel-sum geomean | 106.451 us |
-| torch_npu helper active-window geomean | 209.043 us |
-| torch_npu helper kernel-sum geomean | 209.136 us |
-| vs Torch 主加速比 active/active | 7.180762x |
-| vs Torch 诊断加速比 kernel/kernel | 5.275206x |
-| vs Torch 诊断 baseline-active/candidate-kernel | 17.029071x |
-| vs Torch 诊断 baseline-kernel/candidate-active | 2.224432x |
-| vs torch_npu PASS 子集主加速比 active/active | 3.271697x |
-| vs torch_npu PASS 子集诊断加速比 kernel/kernel | 9.813551x |
-| 选中基线主加速比 active/active | 4.716968x |
-| 选中基线诊断加速比 kernel/kernel | 8.498617x |
-| public 正确性验证 | 80/80 PASS |
-| random generalization 正确性验证 | 40/40 PASS |
+| OpForge run id | `eval_20260615_154048` |
+| OpForge 状态 | `PERF_REGRESSION` |
+| public 正确性 | 80/80 PASS |
+| active/active geomean | 15.578318x |
+| kernel/kernel geomean | 9.171818x |
+| candidate active mean | 50.138 us |
+| candidate kernel mean | 50.130 us |
+| candidate mean gap | 0.036 us |
+| active regression cases | 2 |
+| baseline source split | task_npu_baseline=47, pytorch_fallback=33 |
+| OpForge generalization audit | 40/40 PASS |
+| delivery correctness | 120/120 PASS; public 80/80, random 40/40 |
+| delivery benchmark timing completeness | Triton active 74/80; missing cases 75-80 due blank Step Id |
 
-`torch_npu` helper 通过 61/80 个 case；未通过的 19 个 case 不作为 NPU helper 精度通过子集统计，选中基线规则为 `torch_npu` 通过则选 `torch_npu`，否则选 Torch 语义实现。
-
-旧的 10 个手写 near-public/boundary case 已从验证入口和交付证据中删除；脚本不保留 `--generalization` 兼容参数。
+`torch_npu` helper 在交付正确性脚本中通过 61/80 个 public case；未通过或未能完整 profiler 的 case 不作为 helper 全覆盖结论。OpForge 选中基线为 `task_npu_baseline` 47 case、`pytorch_fallback` 33 case。状态仍为 `PERF_REGRESSION`，不能表述为性能门完全通过。
 
 ## 实现边界
 

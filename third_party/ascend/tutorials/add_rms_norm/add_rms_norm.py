@@ -48,60 +48,12 @@ def _add_rms_norm_kernel(
 
     x1 = tl.load(x1_ptr + offsets, mask=mask, other=0.0).to(tl.float32)
     x2 = tl.load(x2_ptr + offsets, mask=mask, other=0.0).to(tl.float32)
-    gamma = tl.load(gamma_ptr + offsets, mask=mask, other=0.0).to(tl.float32)
-
     z = x1 + x2
     sq = tl.where(mask, z * z, 0.0)
     variance = tl.sum(sq, axis=0) / h_size
     rstd = 1.0 / tl.sqrt(variance + epsilon)
-    y = z * rstd * gamma
-    tl.store(y_ptr + offsets, y, mask=mask)
-
-
-@triton.jit
-def _add_rms_norm_rstd_kernel(
-    x1_ptr,
-    x2_ptr,
-    rstd_ptr,
-    n_rows: tl.constexpr,
-    h_size: tl.constexpr,
-    epsilon: tl.constexpr,
-    block_h: tl.constexpr,
-):
-    row = tl.program_id(axis=0)
-    cols = tl.arange(0, block_h)
-    mask = cols < h_size
-    offsets = row * h_size + cols
-
-    x1 = tl.load(x1_ptr + offsets, mask=mask, other=0.0).to(tl.float32)
-    x2 = tl.load(x2_ptr + offsets, mask=mask, other=0.0).to(tl.float32)
-    z = x1 + x2
-    sq = tl.where(mask, z * z, 0.0)
-    variance = tl.sum(sq, axis=0) / h_size
-    tl.store(rstd_ptr + row, 1.0 / tl.sqrt(variance + epsilon))
-
-
-@triton.jit
-def _add_rms_norm_apply_kernel(
-    x1_ptr,
-    x2_ptr,
-    gamma_ptr,
-    rstd_ptr,
-    y_ptr,
-    n_rows: tl.constexpr,
-    h_size: tl.constexpr,
-    block_h: tl.constexpr,
-):
-    row = tl.program_id(axis=0)
-    cols = tl.arange(0, block_h)
-    mask = cols < h_size
-    offsets = row * h_size + cols
-
-    x1 = tl.load(x1_ptr + offsets, mask=mask, other=0.0).to(tl.float32)
-    x2 = tl.load(x2_ptr + offsets, mask=mask, other=0.0).to(tl.float32)
     gamma = tl.load(gamma_ptr + offsets, mask=mask, other=0.0).to(tl.float32)
-    rstd = tl.load(rstd_ptr + row).to(tl.float32)
-    y = (x1 + x2) * rstd * gamma
+    y = z * rstd * gamma
     tl.store(y_ptr + offsets, y, mask=mask)
 
 
@@ -219,7 +171,7 @@ def add_rms_norm(
     n_rows = int(x1.numel() // h_size)
     y = torch.empty_like(x1)
     grid = (n_rows,)
-    if h_size <= 4096:
+    if h_size <= 8192:
         _add_rms_norm_kernel[grid](
             x1,
             x2,
@@ -228,27 +180,6 @@ def add_rms_norm(
             n_rows,
             h_size,
             epsilon_value,
-            block_h,
-        )
-    elif block_h <= 8192:
-        rstd = torch.empty((n_rows,), device=x1.device, dtype=torch.float32)
-        _add_rms_norm_rstd_kernel[grid](
-            x1,
-            x2,
-            rstd,
-            n_rows,
-            h_size,
-            epsilon_value,
-            block_h,
-        )
-        _add_rms_norm_apply_kernel[grid](
-            x1,
-            x2,
-            gamma,
-            rstd,
-            y,
-            n_rows,
-            h_size,
             block_h,
         )
     else:

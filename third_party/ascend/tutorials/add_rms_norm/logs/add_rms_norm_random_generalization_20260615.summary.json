@@ -1,7 +1,7 @@
 {
-  "schema_version": 1,
-  "source_jsonl": "logs/add_rms_norm_random_generalization_20260613.jsonl",
-  "source_log": "logs/add_rms_norm_random_generalization_20260613.log",
+  "schema_version": 2,
+  "source_jsonl": "logs/add_rms_norm_random_generalization_20260615.jsonl",
+  "source_log": "logs/add_rms_norm_random_generalization_20260615.log",
   "random_seed": 20260613,
   "shape_policy": "seeded_non_public_bsh_v1",
   "total_cases": 120,
@@ -26,8 +26,8 @@
     }
   },
   "random_category_counts": {
-    "contract_shape": 8,
     "near_hidden": 12,
+    "contract_shape": 8,
     "small_tail": 9,
     "wide_hidden": 11
   },
@@ -474,8 +474,8 @@
     }
   ],
   "notes": [
+    "Correctness-only validation intentionally records active/kernel timings as N/A.",
     "Random generalization cases are fixed-seed reproducible non-public shape samples.",
-    "They are correctness evidence only; the 80 public timing matrix remains the delivery performance source.",
-    "The removed legacy validation log used 10 hand-written near-public/boundary cases and is no longer part of this delivery."
+    "They are correctness evidence only; OpForge eval_20260615_154048 is the canonical performance source."
   ]
 }
