@@ -1,0 +1,24 @@
+[PASS] 001/020 public id=public_001 shape=B1,N28,Skv1,Scache8,Dk64,Dv64 mismatches=0 max_diff=0 MARE=0 latency=170.897 us timing_source=delivery_wall_sync_us
+[PASS] 002/020 public id=public_002 shape=B1,N32,Skv1,Scache8,Dk64,Dv64 mismatches=0 max_diff=0 MARE=0 latency=152.137 us timing_source=delivery_wall_sync_us
+[PASS] 003/020 public id=public_003 shape=B1,N40,Skv1,Scache8,Dk64,Dv64 mismatches=0 max_diff=0 MARE=0 latency=153.476 us timing_source=delivery_wall_sync_us
+[PASS] 004/020 public id=public_004 shape=B1,N64,Skv1,Scache8,Dk64,Dv64 mismatches=0 max_diff=0 MARE=0 latency=158.287 us timing_source=delivery_wall_sync_us
+[PASS] 005/020 public id=public_005 shape=B8,N28,Skv1,Scache8,Dk64,Dv64 mismatches=0 max_diff=0 MARE=0 latency=192.179 us timing_source=delivery_wall_sync_us
+[PASS] 006/020 public id=public_006 shape=B8,N32,Skv1,Scache8,Dk64,Dv64 mismatches=0 max_diff=0 MARE=0 latency=169.278 us timing_source=delivery_wall_sync_us
+[PASS] 007/020 public id=public_007 shape=B8,N40,Skv1,Scache8,Dk64,Dv64 mismatches=0 max_diff=0 MARE=0 latency=180.288 us timing_source=delivery_wall_sync_us
+[PASS] 008/020 public id=public_008 shape=B8,N64,Skv1,Scache8,Dk64,Dv64 mismatches=0 max_diff=0 MARE=0 latency=169.818 us timing_source=delivery_wall_sync_us
+[PASS] 009/020 public id=public_009 shape=B16,N28,Skv1,Scache8,Dk64,Dv64 mismatches=0 max_diff=0 MARE=0 latency=190.798 us timing_source=delivery_wall_sync_us
+[PASS] 010/020 public id=public_010 shape=B16,N32,Skv1,Scache8,Dk64,Dv64 mismatches=0 max_diff=0 MARE=0 latency=163.897 us timing_source=delivery_wall_sync_us
+[PASS] 011/020 public id=public_011 shape=B16,N40,Skv1,Scache8,Dk64,Dv64 mismatches=0 max_diff=0 MARE=0 latency=168.438 us timing_source=delivery_wall_sync_us
+[PASS] 012/020 public id=public_012 shape=B16,N64,Skv1,Scache8,Dk64,Dv64 mismatches=0 max_diff=0 MARE=0 latency=204.899 us timing_source=delivery_wall_sync_us
+[PASS] 013/020 public id=public_013 shape=B32,N28,Skv1,Scache8,Dk64,Dv64 mismatches=0 max_diff=0 MARE=0 latency=196.379 us timing_source=delivery_wall_sync_us
+[PASS] 014/020 public id=public_014 shape=B32,N32,Skv1,Scache8,Dk64,Dv64 mismatches=0 max_diff=0.00195312 MARE=4.43569e-09 latency=194.809 us timing_source=delivery_wall_sync_us
+[PASS] 015/020 public id=public_015 shape=B32,N40,Skv1,Scache8,Dk64,Dv64 mismatches=0 max_diff=0 MARE=0 latency=206.119 us timing_source=delivery_wall_sync_us
+[PASS] 016/020 public id=public_016 shape=B32,N64,Skv1,Scache8,Dk64,Dv64 mismatches=0 max_diff=0 MARE=0 latency=297.133 us timing_source=delivery_wall_sync_us
+[PASS] 017/020 public id=public_017 shape=B64,N28,Skv1,Scache8,Dk64,Dv64 mismatches=0 max_diff=0 MARE=0 latency=249.831 us timing_source=delivery_wall_sync_us
+[PASS] 018/020 public id=public_018 shape=B64,N32,Skv1,Scache8,Dk64,Dv64 mismatches=0 max_diff=0 MARE=0 latency=319.494 us timing_source=delivery_wall_sync_us
+[PASS] 019/020 public id=public_019 shape=B64,N40,Skv1,Scache8,Dk64,Dv64 mismatches=0 max_diff=0 MARE=0 latency=355.525 us timing_source=delivery_wall_sync_us
+[PASS] 020/020 public id=public_020 shape=B64,N64,Skv1,Scache8,Dk64,Dv64 mismatches=0 max_diff=0.00390625 MARE=1.69091e-09 latency=473.700 us timing_source=delivery_wall_sync_us
+SUMMARY total=20 passed=20 failed=0 public=20 random=0
+LATENCY_DELIVERY_WALL geomean=207.255 us mean=218.369 us min=152.137 us max=473.700 us count=20 timing_source=delivery_wall_sync_us
+CANONICAL_JSONL path=logs/kv_rms_norm_rope_cache_benchmark_20260617.jsonl
+CANONICAL_JSONL_SUMMARY path=logs/kv_rms_norm_rope_cache_benchmark_20260617.summary.json

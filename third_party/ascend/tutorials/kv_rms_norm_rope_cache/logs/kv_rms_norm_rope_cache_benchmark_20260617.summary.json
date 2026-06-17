@@ -1,0 +1,17 @@
+{
+  "benchmark": true,
+  "failed": 0,
+  "latency_us": {
+    "count": 20,
+    "geomean": 207.25480875729656,
+    "max": 473.69999811053276,
+    "mean": 218.36908999830484,
+    "min": 152.1371304988861
+  },
+  "passed": 20,
+  "public_cases": 20,
+  "random_generalization_cases": 0,
+  "random_seed": 20260617,
+  "timing_source": "delivery_wall_sync_us",
+  "total": 20
+}
