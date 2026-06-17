@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "source_jsonl": "dynamic_quant_validation_20260617_155614.jsonl",
+  "source_log": "dynamic_quant_validation_20260617_155614.log",
+  "total": 80,
+  "passed": 80,
+  "failed": 0,
+  "public": 40,
+  "random_generalization": 40,
+  "dst_type_counts": {
+    "int8": 40,
+    "int4": 40
+  },
+  "max_output_diff": 1,
+  "max_scale_abs_diff": 0.0,
+  "max_mismatch_count": 0,
+  "range_failures": 0,
+  "debug_host_timing": null
+}
