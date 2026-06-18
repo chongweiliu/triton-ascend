@@ -16,7 +16,6 @@ import torch
 
 from mrope import mrope
 
-
 BF16_THRESHOLD = 0.02
 RANDOM_GENERALIZATION_POLICY = "seeded_mrope_metadata_v1"
 
@@ -192,8 +191,7 @@ def load_public_cases(evidence_path: Path) -> list[Case]:
                 attrs=dict(item["attrs"]),
                 value_range=[[float(v) for v in rng] for rng in item["value_range"]],
                 note=str(item.get("note", "")),
-            )
-        )
+            ))
     return cases
 
 
@@ -246,14 +244,14 @@ def random_generalization_cases(count: int, seed: int) -> list[Case]:
                 value_range=[[0, max_seq - 1], q_range, k_range, [-1.0, 1.0]],
                 note="seeded non-public MRoPE metadata sample",
                 random_category=name,
-            )
-        )
+            ))
     if len(cases) != count:
         raise RuntimeError(f"generated {len(cases)} random cases, expected {count}")
     return cases
 
 
-def compare_outputs(actual: tuple[torch.Tensor, torch.Tensor], expected: tuple[torch.Tensor, torch.Tensor]) -> dict[str, object]:
+def compare_outputs(actual: tuple[torch.Tensor, torch.Tensor], expected: tuple[torch.Tensor,
+                                                                               torch.Tensor]) -> dict[str, object]:
     output_results = []
     total_mismatch = 0
     max_diff = 0.0
@@ -269,16 +267,14 @@ def compare_outputs(actual: tuple[torch.Tensor, torch.Tensor], expected: tuple[t
         total_mismatch += mismatch_count
         max_diff = max(max_diff, item_max)
         max_mare = max(max_mare, mare)
-        output_results.append(
-            {
-                "index": index,
-                "passed": mismatch_count == 0,
-                "mismatch_count": mismatch_count,
-                "total_count": total,
-                "max_diff": item_max,
-                "mare": mare,
-            }
-        )
+        output_results.append({
+            "index": index,
+            "passed": mismatch_count == 0,
+            "mismatch_count": mismatch_count,
+            "total_count": total,
+            "max_diff": item_max,
+            "mare": mare,
+        })
     return {
         "passed": total_mismatch == 0,
         "threshold": BF16_THRESHOLD,
@@ -301,13 +297,11 @@ def run_case(case: Case, index: int, total: int, device: str, eval_seed: int) ->
     compare = compare_outputs(actual, expected)
     status = "PASS" if compare["passed"] else "FAIL"
     shape = case.input_shape
-    print(
-        f"[{status}] {index:03d}/{total:03d} {case.kind} case_id={case.case_id} "
-        f"positions={shape[0]} query={shape[1]} cache={shape[3]} "
-        f"rotary_mode={attrs.get('rotary_mode')} cache_mode={attrs.get('cache_mode')} "
-        f"section={attrs.get('mrope_section')} mismatch={compare['mismatch_count']} "
-        f"mare={compare['mare']:.6e} max_diff={compare['max_diff']:.6e}"
-    )
+    print(f"[{status}] {index:03d}/{total:03d} {case.kind} case_id={case.case_id} "
+          f"positions={shape[0]} query={shape[1]} cache={shape[3]} "
+          f"rotary_mode={attrs.get('rotary_mode')} cache_mode={attrs.get('cache_mode')} "
+          f"section={attrs.get('mrope_section')} mismatch={compare['mismatch_count']} "
+          f"mare={compare['mare']:.6e} max_diff={compare['max_diff']:.6e}")
     return {
         "case_id": case.case_id,
         "kind": case.kind,
@@ -365,13 +359,11 @@ def main() -> int:
         "max_mare": max(float(r["compare"]["mare"]) for r in records),
         "total_mismatch_count": sum(int(r["compare"]["mismatch_count"]) for r in records),
     }
-    print(
-        "SUMMARY "
-        f"status={summary['status']} total={total} passed={passed} failed={total - passed} "
-        f"public={summary['public']} random={summary['random_generalization']} "
-        f"max_diff={summary['max_diff']:.6e} max_mare={summary['max_mare']:.6e} "
-        f"mismatch={summary['total_mismatch_count']}"
-    )
+    print("SUMMARY "
+          f"status={summary['status']} total={total} passed={passed} failed={total - passed} "
+          f"public={summary['public']} random={summary['random_generalization']} "
+          f"max_diff={summary['max_diff']:.6e} max_mare={summary['max_mare']:.6e} "
+          f"mismatch={summary['total_mismatch_count']}")
     if args.summary_json:
         args.summary_json.parent.mkdir(parents=True, exist_ok=True)
         args.summary_json.write_text(json.dumps(summary, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")

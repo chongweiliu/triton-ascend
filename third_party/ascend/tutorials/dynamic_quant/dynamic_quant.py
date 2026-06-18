@@ -23,7 +23,6 @@ try:
 except ModuleNotFoundError:
     import triton.language.extra.ascend.libdevice as libdevice
 
-
 _ROW_STRIDE_MIN_ROWS = 48
 _ROW_STRIDE_GRID = 48
 
@@ -195,7 +194,7 @@ def dynamic_quant(x: torch.Tensor, dst_type: str = "int8") -> Tuple[torch.Tensor
     if hidden <= 8192:
         block_h = hidden
         if rows > _ROW_STRIDE_MIN_ROWS:
-            _dynamic_quant_kernel_row_stride[(_ROW_STRIDE_GRID,)](
+            _dynamic_quant_kernel_row_stride[(_ROW_STRIDE_GRID, )](
                 x,
                 output,
                 scale,
@@ -207,7 +206,7 @@ def dynamic_quant(x: torch.Tensor, dst_type: str = "int8") -> Tuple[torch.Tensor
                 q_max=q_max,
             )
             return output, scale
-        _dynamic_quant_kernel[(rows,)](
+        _dynamic_quant_kernel[(rows, )](
             x,
             output,
             scale,
@@ -225,7 +224,7 @@ def dynamic_quant(x: torch.Tensor, dst_type: str = "int8") -> Tuple[torch.Tensor
     if num_chunks >= 65536:
         raise ValueError("dynamic_quant hidden dimension exceeds Triton-Ascend block limit")
     if hidden % chunk_h == 0:
-        _dynamic_quant_loop_nomask_kernel[(rows,)](
+        _dynamic_quant_loop_nomask_kernel[(rows, )](
             x,
             output,
             scale,
@@ -237,7 +236,7 @@ def dynamic_quant(x: torch.Tensor, dst_type: str = "int8") -> Tuple[torch.Tensor
             q_max=q_max,
         )
         return output, scale
-    _dynamic_quant_loop_kernel[(rows,)](
+    _dynamic_quant_loop_kernel[(rows, )](
         x,
         output,
         scale,

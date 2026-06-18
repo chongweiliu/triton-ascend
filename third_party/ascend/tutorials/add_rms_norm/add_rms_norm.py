@@ -170,7 +170,7 @@ def add_rms_norm(
     block_h = int(triton.next_power_of_2(h_size))
     n_rows = int(x1.numel() // h_size)
     y = torch.empty_like(x1)
-    grid = (n_rows,)
+    grid = (n_rows, )
     if h_size <= 8192:
         _add_rms_norm_kernel[grid](
             x1,
@@ -187,11 +187,9 @@ def add_rms_norm(
         n_chunks = (h_size + chunk_h - 1) // chunk_h
         block_chunks = int(triton.next_power_of_2(n_chunks))
         if block_chunks > 8192:
-            raise ValueError(
-                f"chunk count block={block_chunks} exceeds this Triton-Ascend implementation limit"
-            )
+            raise ValueError(f"chunk count block={block_chunks} exceeds this Triton-Ascend implementation limit")
         partial = torch.empty((n_rows, n_chunks), device=x1.device, dtype=torch.float32)
-        rstd = torch.empty((n_rows,), device=x1.device, dtype=torch.float32)
+        rstd = torch.empty((n_rows, ), device=x1.device, dtype=torch.float32)
         chunk_grid = (n_rows, n_chunks)
         _add_rms_norm_partial_sum_kernel[chunk_grid](
             x1,

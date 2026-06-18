@@ -63,7 +63,7 @@ def _mrope_apply_kernel(
         cut0 = sec0
         cut1 = sec0 + sec1
         cut2 = sec0 + sec1 + sec2
-        row = tl.full((BLOCK,), 0, dtype=tl.int64)
+        row = tl.full((BLOCK, ), 0, dtype=tl.int64)
         row = tl.where(cos_idx >= cut0, 1, row)
         row = tl.where(cos_idx >= cut1, 2, row)
         row = tl.where(cos_idx >= cut2, 3, row)
@@ -73,11 +73,14 @@ def _mrope_apply_kernel(
     cache_mask = rotate_mask & pos_valid
 
     if CACHE_INTERLEAVED:
-        cos_val = tl.load(cache + safe_pos * rotary_dim + cos_idx * 2, mask=cache_mask, other=float("nan")).to(tl.float32)
-        sin_val = tl.load(cache + safe_pos * rotary_dim + cos_idx * 2 + 1, mask=cache_mask, other=float("nan")).to(tl.float32)
+        cos_val = tl.load(cache + safe_pos * rotary_dim + cos_idx * 2, mask=cache_mask,
+                          other=float("nan")).to(tl.float32)
+        sin_val = tl.load(cache + safe_pos * rotary_dim + cos_idx * 2 + 1, mask=cache_mask,
+                          other=float("nan")).to(tl.float32)
     else:
         cos_val = tl.load(cache + safe_pos * rotary_dim + cos_idx, mask=cache_mask, other=float("nan")).to(tl.float32)
-        sin_val = tl.load(cache + safe_pos * rotary_dim + half_dim + cos_idx, mask=cache_mask, other=float("nan")).to(tl.float32)
+        sin_val = tl.load(cache + safe_pos * rotary_dim + half_dim + cos_idx, mask=cache_mask,
+                          other=float("nan")).to(tl.float32)
 
     if ROTARY_INTERLEAVED:
         even = (d % 2) == 0
@@ -116,7 +119,7 @@ def _mrope_full_half_default_2d_kernel(
     head_block_id = pid - token * head_blocks
 
     cols_1d = tl.arange(0, 64)
-    rows = tl.full((64,), 0, dtype=tl.int32)
+    rows = tl.full((64, ), 0, dtype=tl.int32)
     cut0 = sec0
     cut1 = sec0 + sec1
     cut2 = sec0 + sec1 + sec2
@@ -173,7 +176,7 @@ def _mrope_full_half_default_2d_pair_kernel(
     head_block_id = pid - token * head_blocks
 
     cols_1d = tl.arange(0, 64)
-    rows = tl.full((64,), 0, dtype=tl.int32)
+    rows = tl.full((64, ), 0, dtype=tl.int32)
     cut0 = sec0
     cut1 = sec0 + sec1
     cut2 = sec0 + sec1 + sec2
@@ -207,10 +210,14 @@ def _mrope_full_half_default_2d_pair_kernel(
     key_first = tl.load(key + base + cols, mask=mask, other=0.0).to(tl.float32)
     key_second = tl.load(key + base + 64 + cols, mask=mask, other=0.0).to(tl.float32)
 
-    tl.store(query_out + base + cols, tl.where(pos_valid, query_first * cos_val - query_second * sin_val, float("nan")), mask=mask)
-    tl.store(query_out + base + 64 + cols, tl.where(pos_valid, query_first * sin_val + query_second * cos_val, float("nan")), mask=mask)
-    tl.store(key_out + base + cols, tl.where(pos_valid, key_first * cos_val - key_second * sin_val, float("nan")), mask=mask)
-    tl.store(key_out + base + 64 + cols, tl.where(pos_valid, key_first * sin_val + key_second * cos_val, float("nan")), mask=mask)
+    tl.store(query_out + base + cols, tl.where(pos_valid, query_first * cos_val - query_second * sin_val, float("nan")),
+             mask=mask)
+    tl.store(query_out + base + 64 + cols,
+             tl.where(pos_valid, query_first * sin_val + query_second * cos_val, float("nan")), mask=mask)
+    tl.store(key_out + base + cols, tl.where(pos_valid, key_first * cos_val - key_second * sin_val, float("nan")),
+             mask=mask)
+    tl.store(key_out + base + 64 + cols, tl.where(pos_valid, key_first * sin_val + key_second * cos_val, float("nan")),
+             mask=mask)
 
 
 @triton.jit
@@ -251,10 +258,14 @@ def _rope_full_half_default_2d_pair_kernel(
     key_first = tl.load(key + base + cols, mask=mask, other=0.0).to(tl.float32)
     key_second = tl.load(key + base + 64 + cols, mask=mask, other=0.0).to(tl.float32)
 
-    tl.store(query_out + base + cols, tl.where(pos_valid, query_first * cos_val - query_second * sin_val, float("nan")), mask=mask)
-    tl.store(query_out + base + 64 + cols, tl.where(pos_valid, query_first * sin_val + query_second * cos_val, float("nan")), mask=mask)
-    tl.store(key_out + base + cols, tl.where(pos_valid, key_first * cos_val - key_second * sin_val, float("nan")), mask=mask)
-    tl.store(key_out + base + 64 + cols, tl.where(pos_valid, key_first * sin_val + key_second * cos_val, float("nan")), mask=mask)
+    tl.store(query_out + base + cols, tl.where(pos_valid, query_first * cos_val - query_second * sin_val, float("nan")),
+             mask=mask)
+    tl.store(query_out + base + 64 + cols,
+             tl.where(pos_valid, query_first * sin_val + query_second * cos_val, float("nan")), mask=mask)
+    tl.store(key_out + base + cols, tl.where(pos_valid, key_first * cos_val - key_second * sin_val, float("nan")),
+             mask=mask)
+    tl.store(key_out + base + 64 + cols, tl.where(pos_valid, key_first * sin_val + key_second * cos_val, float("nan")),
+             mask=mask)
 
 
 @triton.jit
@@ -280,7 +291,7 @@ def _mrope_half_interleave64_2d_pair_kernel(
     head_block_id = pid - token * head_blocks
 
     cols_1d = tl.arange(0, 32)
-    rows = tl.full((32,), 0, dtype=tl.int32)
+    rows = tl.full((32, ), 0, dtype=tl.int32)
     cut0 = sec0
     cut1 = sec0 + sec1
     cut2 = sec0 + sec1 + sec2
@@ -315,10 +326,14 @@ def _mrope_half_interleave64_2d_pair_kernel(
     key_first = tl.load(key + base + rot_cols, mask=mask, other=0.0).to(tl.float32)
     key_second = tl.load(key + base + 32 + rot_cols, mask=mask, other=0.0).to(tl.float32)
 
-    tl.store(query_out + base + rot_cols, tl.where(pos_valid, query_first * cos_val - query_second * sin_val, float("nan")), mask=mask)
-    tl.store(query_out + base + 32 + rot_cols, tl.where(pos_valid, query_first * sin_val + query_second * cos_val, float("nan")), mask=mask)
-    tl.store(key_out + base + rot_cols, tl.where(pos_valid, key_first * cos_val - key_second * sin_val, float("nan")), mask=mask)
-    tl.store(key_out + base + 32 + rot_cols, tl.where(pos_valid, key_first * sin_val + key_second * cos_val, float("nan")), mask=mask)
+    tl.store(query_out + base + rot_cols,
+             tl.where(pos_valid, query_first * cos_val - query_second * sin_val, float("nan")), mask=mask)
+    tl.store(query_out + base + 32 + rot_cols,
+             tl.where(pos_valid, query_first * sin_val + query_second * cos_val, float("nan")), mask=mask)
+    tl.store(key_out + base + rot_cols, tl.where(pos_valid, key_first * cos_val - key_second * sin_val, float("nan")),
+             mask=mask)
+    tl.store(key_out + base + 32 + rot_cols,
+             tl.where(pos_valid, key_first * sin_val + key_second * cos_val, float("nan")), mask=mask)
 
     query_tail = tl.load(query + base + 64 + tail_cols, mask=mask, other=0.0)
     key_tail = tl.load(key + base + 64 + tail_cols, mask=mask, other=0.0)
@@ -349,7 +364,7 @@ def _mrope_interleaved_default_2d_pair_kernel(
     head_block_id = pid - token * head_blocks
 
     cols_1d = tl.arange(0, 64)
-    rows = tl.full((64,), 0, dtype=tl.int32)
+    rows = tl.full((64, ), 0, dtype=tl.int32)
     cut0 = sec0
     cut1 = sec0 + sec1
     cut2 = sec0 + sec1 + sec2
@@ -385,10 +400,14 @@ def _mrope_interleaved_default_2d_pair_kernel(
     key_even = tl.load(key + base + even_cols, mask=mask, other=0.0).to(tl.float32)
     key_odd = tl.load(key + base + odd_cols, mask=mask, other=0.0).to(tl.float32)
 
-    tl.store(query_out + base + even_cols, tl.where(pos_valid, query_even * cos_val - query_odd * sin_val, float("nan")), mask=mask)
-    tl.store(query_out + base + odd_cols, tl.where(pos_valid, query_odd * cos_val + query_even * sin_val, float("nan")), mask=mask)
-    tl.store(key_out + base + even_cols, tl.where(pos_valid, key_even * cos_val - key_odd * sin_val, float("nan")), mask=mask)
-    tl.store(key_out + base + odd_cols, tl.where(pos_valid, key_odd * cos_val + key_even * sin_val, float("nan")), mask=mask)
+    tl.store(query_out + base + even_cols, tl.where(pos_valid, query_even * cos_val - query_odd * sin_val,
+                                                    float("nan")), mask=mask)
+    tl.store(query_out + base + odd_cols, tl.where(pos_valid, query_odd * cos_val + query_even * sin_val, float("nan")),
+             mask=mask)
+    tl.store(key_out + base + even_cols, tl.where(pos_valid, key_even * cos_val - key_odd * sin_val, float("nan")),
+             mask=mask)
+    tl.store(key_out + base + odd_cols, tl.where(pos_valid, key_odd * cos_val + key_even * sin_val, float("nan")),
+             mask=mask)
 
 
 def _as_section(mrope_section) -> list[int]:
@@ -419,19 +438,11 @@ def _launch_apply(
     is_rope = _is_rope(section)
     pos_rows = 1 if positions.dim() == 1 else int(positions.shape[0])
     padded = list(section) + [0, 0, 0, 0]
-    if (
-        not is_rope
-        and int(head_size) == 128
-        and rotary_dim == 128
-        and half_dim == 64
-        and str(rotary_mode) == "half"
-        and str(cache_mode) == "default"
-        and len(section) in (3, 4)
-        and sum(int(v) for v in section) == 64
-    ):
+    if (not is_rope and int(head_size) == 128 and rotary_dim == 128 and half_dim == 64 and str(rotary_mode) == "half"
+            and str(cache_mode) == "default" and len(section) in (3, 4) and sum(int(v) for v in section) == 64):
         head_block = 4
         head_blocks = triton.cdiv(heads, head_block)
-        _mrope_full_half_default_2d_kernel[(tokens * head_blocks,)](
+        _mrope_full_half_default_2d_kernel[(tokens * head_blocks, )](
             positions,
             x,
             cache,
@@ -450,7 +461,7 @@ def _launch_apply(
 
     block = 256
     total = int(x.numel())
-    _mrope_apply_kernel[(triton.cdiv(total, block),)](
+    _mrope_apply_kernel[(triton.cdiv(total, block), )](
         positions,
         x,
         cache,
@@ -490,7 +501,7 @@ def _launch_apply_pair_2d(
     padded = list(section) + [0, 0, 0, 0]
     head_block = 64
     head_blocks = triton.cdiv(heads, head_block)
-    _mrope_full_half_default_2d_pair_kernel[(tokens * head_blocks,)](
+    _mrope_full_half_default_2d_pair_kernel[(tokens * head_blocks, )](
         positions,
         query,
         key,
@@ -522,7 +533,7 @@ def _launch_apply_pair_2d_rope_full_half_default(
     heads = int(query.shape[1]) // int(head_size)
     head_block = 4
     head_blocks = triton.cdiv(heads, head_block)
-    _rope_full_half_default_2d_pair_kernel[(tokens * head_blocks,)](
+    _rope_full_half_default_2d_pair_kernel[(tokens * head_blocks, )](
         positions,
         query,
         key,
@@ -553,7 +564,7 @@ def _launch_apply_pair_2d_half_interleave64(
     padded = list(section) + [0, 0, 0, 0]
     head_block = 4
     head_blocks = triton.cdiv(heads, head_block)
-    _mrope_half_interleave64_2d_pair_kernel[(tokens * head_blocks,)](
+    _mrope_half_interleave64_2d_pair_kernel[(tokens * head_blocks, )](
         positions,
         query,
         key,
@@ -588,7 +599,7 @@ def _launch_apply_pair_2d_interleaved_default(
     padded = list(section) + [0, 0, 0, 0]
     head_block = 4
     head_blocks = triton.cdiv(heads, head_block)
-    _mrope_interleaved_default_2d_pair_kernel[(tokens * head_blocks,)](
+    _mrope_interleaved_default_2d_pair_kernel[(tokens * head_blocks, )](
         positions,
         query,
         key,
@@ -648,8 +659,10 @@ def mrope(
             raise ValueError("MRoPE mrope_section length must be 3 or 4")
         if any(int(v) < 0 for v in section):
             raise ValueError("MRoPE mrope_section entries must be non-negative")
-        if positions.dim() != 2 or int(positions.shape[0]) not in (3, 4) or int(positions.shape[0]) != len(section) or int(positions.shape[1]) != tokens:
-            raise ValueError("MRoPE positions shape must be [3, num_tokens] or [4, num_tokens] and match mrope_section length")
+        if positions.dim() != 2 or int(positions.shape[0]) not in (3, 4) or int(
+                positions.shape[0]) != len(section) or int(positions.shape[1]) != tokens:
+            raise ValueError(
+                "MRoPE positions shape must be [3, num_tokens] or [4, num_tokens] and match mrope_section length")
         if sum(section) != rotary_dim // 2:
             raise ValueError("sum(mrope_section) must equal rotary_dim / 2")
     for name, tensor, dtype in (
@@ -668,55 +681,25 @@ def mrope(
     query_heads = int(query.shape[1]) // head
     key_heads = int(key.shape[1]) // head
     half_dim = rotary_dim // 2
-    if (
-        not is_rope
-        and query_heads == key_heads
-        and head == 128
-        and rotary_dim == 128
-        and half_dim == 64
-        and str(rotary_mode) == "half"
-        and str(cache_mode) == "default"
-        and len(section) in (3, 4)
-        and sum(int(v) for v in section) == 64
-    ):
+    if (not is_rope and query_heads == key_heads and head == 128 and rotary_dim == 128 and half_dim == 64
+            and str(rotary_mode) == "half" and str(cache_mode) == "default" and len(section) in (3, 4)
+            and sum(int(v) for v in section) == 64):
         _launch_apply_pair_2d(positions, query, key, cos_sin_cache, query_out, key_out, head, section)
         return query_out, key_out
-    if (
-        is_rope
-        and query_heads == key_heads
-        and head == 128
-        and rotary_dim == 128
-        and half_dim == 64
-        and str(rotary_mode) == "half"
-        and str(cache_mode) == "default"
-    ):
+    if (is_rope and query_heads == key_heads and head == 128 and rotary_dim == 128 and half_dim == 64
+            and str(rotary_mode) == "half" and str(cache_mode) == "default"):
         _launch_apply_pair_2d_rope_full_half_default(positions, query, key, cos_sin_cache, query_out, key_out, head)
         return query_out, key_out
-    if (
-        not is_rope
-        and query_heads == key_heads
-        and head == 128
-        and rotary_dim == 64
-        and half_dim == 32
-        and str(rotary_mode) == "half"
-        and str(cache_mode) == "interleave"
-        and len(section) == 3
-        and sum(int(v) for v in section) == 32
-    ):
+    if (not is_rope and query_heads == key_heads and head == 128 and rotary_dim == 64 and half_dim == 32
+            and str(rotary_mode) == "half" and str(cache_mode) == "interleave" and len(section) == 3
+            and sum(int(v) for v in section) == 32):
         _launch_apply_pair_2d_half_interleave64(positions, query, key, cos_sin_cache, query_out, key_out, head, section)
         return query_out, key_out
-    if (
-        not is_rope
-        and query_heads == key_heads
-        and head == 128
-        and rotary_dim == 128
-        and half_dim == 64
-        and str(rotary_mode) == "interleaved"
-        and str(cache_mode) == "default"
-        and len(section) in (3, 4)
-        and sum(int(v) for v in section) == 64
-    ):
-        _launch_apply_pair_2d_interleaved_default(positions, query, key, cos_sin_cache, query_out, key_out, head, section)
+    if (not is_rope and query_heads == key_heads and head == 128 and rotary_dim == 128 and half_dim == 64
+            and str(rotary_mode) == "interleaved" and str(cache_mode) == "default" and len(section) in (3, 4)
+            and sum(int(v) for v in section) == 64):
+        _launch_apply_pair_2d_interleaved_default(positions, query, key, cos_sin_cache, query_out, key_out, head,
+                                                  section)
         return query_out, key_out
 
     _launch_apply(positions, query, cos_sin_cache, query_out, head, section, rotary_mode, cache_mode)

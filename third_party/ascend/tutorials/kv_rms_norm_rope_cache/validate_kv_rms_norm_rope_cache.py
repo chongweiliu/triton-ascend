@@ -23,7 +23,6 @@ except Exception as exc:  # pragma: no cover - requires Ascend runtime.
 
 from kv_rms_norm_rope_cache import kv_rms_norm_rope_cache
 
-
 DOC_MODEL_ROWS = [
     (1, 28),
     (1, 32),
@@ -103,8 +102,7 @@ def public_cases() -> list[Case]:
                 d_value=64,
                 seed=_seed_from_case_id(f"public_{idx:03d}", 20260617),
                 note="documented model row, public 64/64 split",
-            )
-        )
+            ))
     return cases
 
 
@@ -142,8 +140,7 @@ def random_generalization_cases(count: int, seed: int) -> list[Case]:
                 d_value=d_value,
                 seed=_seed_from_case_id(case_id, seed),
                 note="seeded docs-row dynamic Dk/Dv sample",
-            )
-        )
+            ))
     if len(cases) != count:
         raise RuntimeError(f"generated {len(cases)} random cases after {attempts} attempts, expected {count}")
     return cases
@@ -165,7 +162,7 @@ def make_inputs(case: Case, device: torch.device) -> tuple[torch.Tensor, ...]:
     gen.manual_seed(int(case.seed))
     d_total = case.d_rope + case.d_value
     kv = _bf16_uniform((case.bsz, case.heads, case.skv, d_total), -1.0, 1.0, gen)
-    gamma = _bf16_uniform((case.d_value,), 0.5, 1.5, gen)
+    gamma = _bf16_uniform((case.d_value, ), 0.5, 1.5, gen)
     cos = _bf16_uniform((case.bsz, 1, 1, case.d_rope), -1.0, 1.0, gen)
     sin = _bf16_uniform((case.bsz, 1, 1, case.d_rope), -1.0, 1.0, gen)
     k_cache = _bf16_uniform((case.bcache, case.heads, case.scache, case.d_rope), -0.25, 0.25, gen)
@@ -202,7 +199,7 @@ def reference_impl(
     d_rope = int(cos.shape[-1])
     d_value = int(gamma.shape[0])
     rope = kv[..., :d_rope].to(torch.float32)
-    value = kv[..., d_rope : d_rope + d_value].to(torch.float32)
+    value = kv[..., d_rope:d_rope + d_value].to(torch.float32)
     k_rope = rope * cos.to(torch.float32) + rotate_half(rope) * sin.to(torch.float32)
     variance = torch.mean(value * value, dim=-1, keepdim=True)
     ckv = value * torch.rsqrt(variance + float(epsilon)) * gamma.to(torch.float32)
@@ -223,7 +220,8 @@ def reference_impl(
     return k_out, ckv_out
 
 
-def compare_outputs(actual: tuple[torch.Tensor, torch.Tensor], expected: tuple[torch.Tensor, torch.Tensor]) -> dict[str, float | int | bool]:
+def compare_outputs(actual: tuple[torch.Tensor, torch.Tensor],
+                    expected: tuple[torch.Tensor, torch.Tensor]) -> dict[str, float | int | bool]:
     mismatch_count = 0
     total_count = 0
     max_diff = 0.0
@@ -322,18 +320,17 @@ def print_record(index: int, total: int, record: dict[str, object]) -> None:
     latency = ""
     if bench:
         latency = f" latency={bench['latency_us']:.3f} us timing_source={bench['timing_source']}"
-    print(
-        f"[{status}] {index:03d}/{total:03d} {case['kind']} id={case['case_id']} "
-        f"shape=B{shape['Bkv']},N{shape['N']},Skv{shape['Skv']},Scache{shape['Scache']},"
-        f"Dk{shape['Dk']},Dv{shape['Dv']} mismatches={accuracy['mismatch_count']} "
-        f"max_diff={accuracy['max_diff']:.6g} MARE={accuracy['mare']:.6g}{latency}"
-    )
+    print(f"[{status}] {index:03d}/{total:03d} {case['kind']} id={case['case_id']} "
+          f"shape=B{shape['Bkv']},N{shape['N']},Skv{shape['Skv']},Scache{shape['Scache']},"
+          f"Dk{shape['Dk']},Dv{shape['Dv']} mismatches={accuracy['mismatch_count']} "
+          f"max_diff={accuracy['max_diff']:.6g} MARE={accuracy['mare']:.6g}{latency}")
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--public", action="store_true", help="run the 20 documented public-style cases")
-    parser.add_argument("--random-generalization", type=int, default=0, help="number of seeded random dynamic split cases")
+    parser.add_argument("--random-generalization", type=int, default=0,
+                        help="number of seeded random dynamic split cases")
     parser.add_argument("--random-seed", type=int, default=20260617)
     parser.add_argument("--benchmark", action="store_true", help="also collect delivery wall-sync candidate timings")
     parser.add_argument("--warmup", type=int, default=3)
@@ -378,7 +375,8 @@ def main() -> None:
         "passed": passed,
         "failed": len(records) - passed,
         "public_cases": sum(1 for record in records if record["case"]["kind"] == "public"),
-        "random_generalization_cases": sum(1 for record in records if record["case"]["kind"] == "random_generalization"),
+        "random_generalization_cases":
+        sum(1 for record in records if record["case"]["kind"] == "random_generalization"),
         "random_seed": args.random_seed,
         "benchmark": bool(args.benchmark),
         "timing_source": "delivery_wall_sync_us" if args.benchmark else "",
@@ -392,17 +390,15 @@ def main() -> None:
             "count": len(latencies),
         }
     if args.summary_json:
-        args.summary_json.write_text(json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    print(
-        f"SUMMARY total={summary['total']} passed={summary['passed']} failed={summary['failed']} "
-        f"public={summary['public_cases']} random={summary['random_generalization_cases']}"
-    )
+        args.summary_json.write_text(
+            json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    print(f"SUMMARY total={summary['total']} passed={summary['passed']} failed={summary['failed']} "
+          f"public={summary['public_cases']} random={summary['random_generalization_cases']}")
     if latencies:
         lat = summary["latency_us"]
         print(
             f"LATENCY_DELIVERY_WALL geomean={lat['geomean']:.3f} us mean={lat['mean']:.3f} us "
-            f"min={lat['min']:.3f} us max={lat['max']:.3f} us count={lat['count']} timing_source=delivery_wall_sync_us"
-        )
+            f"min={lat['min']:.3f} us max={lat['max']:.3f} us count={lat['count']} timing_source=delivery_wall_sync_us")
     if args.jsonl:
         print(f"CANONICAL_JSONL path={args.jsonl}")
     if args.summary_json:

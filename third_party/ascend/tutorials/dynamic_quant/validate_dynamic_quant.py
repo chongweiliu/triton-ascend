@@ -25,7 +25,6 @@ else:
 
 from dynamic_quant import dynamic_quant
 
-
 PUBLIC_BH_SHAPES = [
     (1, 3584),
     (1, 4096),
@@ -192,7 +191,8 @@ def _reference_dynamic_quant(x: torch.Tensor, dst_type: str) -> tuple[torch.Tens
     return output, scale_out.squeeze(-1).to(torch.float32)
 
 
-def _compare(case: Case, output: torch.Tensor, scale: torch.Tensor, ref_output: torch.Tensor, ref_scale: torch.Tensor) -> dict[str, object]:
+def _compare(case: Case, output: torch.Tensor, scale: torch.Tensor, ref_output: torch.Tensor,
+             ref_scale: torch.Tensor) -> dict[str, object]:
     output_cpu = output.detach().cpu()
     scale_cpu = scale.detach().cpu()
     ref_output_cpu = ref_output.detach().cpu()
@@ -301,22 +301,21 @@ def main() -> int:
                 out_file.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n")
             status = "PASS" if record["passed"] else "FAIL"
             timing = _format_us(record.get("debug_host_median_us"))
-            print(
-                f"[{status}] {index:03d}/{len(cases):03d} {case.case_id} "
-                f"shape={case.shape} dst_type={case.dst_type} "
-                f"output_max_diff={record['output_max_diff']} "
-                f"scale_max_abs_diff={record['scale_max_abs_diff']:.6g} "
-                f"debug_host={timing}")
+            print(f"[{status}] {index:03d}/{len(cases):03d} {case.case_id} "
+                  f"shape={case.shape} dst_type={case.dst_type} "
+                  f"output_max_diff={record['output_max_diff']} "
+                  f"scale_max_abs_diff={record['scale_max_abs_diff']:.6g} "
+                  f"debug_host={timing}")
 
-    print(
-        "SUMMARY "
-        f"total={len(cases)} passed={passed} failed={len(cases) - passed} "
-        f"public={sum(1 for r in records if r['kind'] == 'public')} "
-        f"random_generalization={sum(1 for r in records if r['kind'] == 'random_generalization')}")
+    print("SUMMARY "
+          f"total={len(cases)} passed={passed} failed={len(cases) - passed} "
+          f"public={sum(1 for r in records if r['kind'] == 'public')} "
+          f"random_generalization={sum(1 for r in records if r['kind'] == 'random_generalization')}")
     return 0 if passed == len(cases) else 1
 
 
 class nullcontext:
+
     def __enter__(self):
         return None
 

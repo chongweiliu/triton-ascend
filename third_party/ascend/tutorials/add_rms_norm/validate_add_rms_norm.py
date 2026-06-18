@@ -27,7 +27,6 @@ except Exception:  # pragma: no cover - depends on Ascend runtime.
 
 from add_rms_norm import add_rms_norm, add_rms_norm_reference
 
-
 PUBLIC_BH_SHAPES = [
     (1, 3584),
     (1, 4096),
@@ -62,12 +61,8 @@ BF16_SMALL_VALUE_THRESHOLD = 2**-8
 BF16_SMALL_VALUE_ERROR = 2**-16
 BF16_CANCEL_BOUNDARY = 2**-3
 BF16_CANCEL_ZERO_THRESHOLD = 2**-3
-WARMUP_MATMUL_SHAPE = os.environ.get(
-    "CANN_BENCH_WARMUP_MATMUL_SHAPE", '"10240,10240;10240,10240"'
-)
-WARMUP_REDUCE_SHAPE = os.environ.get(
-    "CANN_BENCH_WARMUP_REDUCE_SHAPE", '"96,1024,1024;3"'
-)
+WARMUP_MATMUL_SHAPE = os.environ.get("CANN_BENCH_WARMUP_MATMUL_SHAPE", '"10240,10240;10240,10240"')
+WARMUP_REDUCE_SHAPE = os.environ.get("CANN_BENCH_WARMUP_REDUCE_SHAPE", '"96,1024,1024;3"')
 
 
 @dataclass(frozen=True)
@@ -174,8 +169,7 @@ def random_generalization_cases(
                 shape_policy=policy,
                 random_category=category,
                 note="seeded non-public random shape sample",
-            )
-        )
+            ))
 
     if len(cases) != count:
         raise RuntimeError(f"generated {len(cases)} random cases after {attempts} attempts, expected {count}")
@@ -387,11 +381,8 @@ def cannbench_bf16_compare(
     small_value_error_mask = small_value_mask & (diff > BF16_SMALL_VALUE_ERROR)
     small_value_error_count = int(small_value_error_mask.sum().item())
 
-    native64 = (
-        native_output.to(torch.float64)
-        if native_output is not None
-        else golden.to(target_dtype).to(torch.float64)
-    )
+    native64 = (native_output.to(torch.float64)
+                if native_output is not None else golden.to(target_dtype).to(torch.float64))
     cpu_diff = torch.abs(native64 - golden_truncated)
     cpu_small_value_error_mask = small_value_mask & (cpu_diff > BF16_SMALL_VALUE_ERROR)
     small_value_cpu_error_count = int(cpu_small_value_error_mask.sum().item())
@@ -404,12 +395,10 @@ def cannbench_bf16_compare(
         small_value_passed = True
 
     actual_abs = torch.abs(actual64)
-    cancel_mask = (
-        (actual_abs < BF16_CANCEL_ZERO_THRESHOLD)
-        & (golden_abs < BF16_CANCEL_BOUNDARY)
-        & (golden_abs >= BF16_SMALL_VALUE_THRESHOLD)
-        & valid
-    )
+    cancel_mask = ((actual_abs < BF16_CANCEL_ZERO_THRESHOLD)
+                   & (golden_abs < BF16_CANCEL_BOUNDARY)
+                   & (golden_abs >= BF16_SMALL_VALUE_THRESHOLD)
+                   & valid)
     cancel_total_count = int(cancel_mask.sum().item())
     cancel_error_mask = cancel_mask & (rel > mare_threshold)
     cancel_error_count = int(cancel_error_mask.sum().item())
@@ -605,7 +594,8 @@ def parse_visible_device_timing_csv(csv_path: Path) -> dict[str, object]:
             try:
                 start_time = float(str(row.get("Start Time(us)", "")).strip())
             except (TypeError, ValueError) as exc:
-                raise ValueError(f"malformed Start Time(us) for step {step_id}: {row.get('Start Time(us)', '')!r}") from exc
+                raise ValueError(
+                    f"malformed Start Time(us) for step {step_id}: {row.get('Start Time(us)', '')!r}") from exc
 
             op_type = row.get("Type", "")
             input_shapes = row.get("Input Shapes", "")
@@ -821,16 +811,16 @@ def profile_once(
             os.dup2(sink.fileno(), 1)
             os.dup2(sink.fileno(), 2)
             with torch_npu.profiler.profile(
-                activities=[
-                    torch_npu.profiler.ProfilerActivity.CPU,
-                    torch_npu.profiler.ProfilerActivity.NPU,
-                ],
-                schedule=torch_npu.profiler.schedule(wait=0, warmup=warmup, active=repeat, repeat=1),
-                on_trace_ready=torch_npu.profiler.tensorboard_trace_handler(str(prof_dir)),
-                record_shapes=False,
-                profile_memory=False,
-                with_stack=False,
-                experimental_config=experimental_config,
+                    activities=[
+                        torch_npu.profiler.ProfilerActivity.CPU,
+                        torch_npu.profiler.ProfilerActivity.NPU,
+                    ],
+                    schedule=torch_npu.profiler.schedule(wait=0, warmup=warmup, active=repeat, repeat=1),
+                    on_trace_ready=torch_npu.profiler.tensorboard_trace_handler(str(prof_dir)),
+                    record_shapes=False,
+                    profile_memory=False,
+                    with_stack=False,
+                    experimental_config=experimental_config,
             ) as prof:
                 pending_exc: BaseException | None = None
                 for i in range(warmup + repeat):
@@ -912,7 +902,8 @@ def profile_once(
             str(timing_data.get("elapsed_us_source", "")),
         )
     except Exception as exc:
-        return last_output, ProfileResult(None, None, None, None, None, None, {}, {}, None, None, f"{type(exc).__name__}: {exc}", timing_strategy)
+        return last_output, ProfileResult(None, None, None, None, None, None, {}, {}, None, None,
+                                          f"{type(exc).__name__}: {exc}", timing_strategy)
 
 
 def _path_key(path: str) -> str:
@@ -964,18 +955,23 @@ def run_case(
     }
 
     result: dict[str, object] = {
-        "case": index,
-        "case_id": case_id,
-        "case_seed": case_seed,
-        "kind": case.kind,
-        "shape": list(case.shape),
-        "dtype": "bfloat16",
-        "threshold": BF16_THRESHOLD,
+        "case":
+        index,
+        "case_id":
+        case_id,
+        "case_seed":
+        case_seed,
+        "kind":
+        case.kind,
+        "shape":
+        list(case.shape),
+        "dtype":
+        "bfloat16",
+        "threshold":
+        BF16_THRESHOLD,
         "value_range": [list(item) for item in case.value_ranges],
-        "timing_policy": (
-            "Triton candidate uses CANN-Bench KernelDetailsStrategy; "
-            "Torch semantic and torch_npu baselines use custom-baseline BaselineActiveWindowStrategy."
-        ),
+        "timing_policy": ("Triton candidate uses CANN-Bench KernelDetailsStrategy; "
+                          "Torch semantic and torch_npu baselines use custom-baseline BaselineActiveWindowStrategy."),
         "implementations": {},
     }
     if case.audit_seed is not None:
@@ -1069,30 +1065,40 @@ def run_case(
         )
         impls[base_name]["speedup_vs_triton"] = impls[base_name]["speedups_vs_triton"]["active_vs_active"]
         impls[base_name]["speedup_vs_triton_text"] = impls[base_name]["speedups_vs_triton"]["active_vs_active_text"]
-    torch_npu_available = bool(
-        impls["torch_npu"]["accuracy"]["passed"] and impls["torch_npu"]["active_window_us"]
-    )
+    torch_npu_available = bool(impls["torch_npu"]["accuracy"]["passed"] and impls["torch_npu"]["active_window_us"])
     selected_name = "torch_npu" if torch_npu_available else "torch"
     selected_speedups = impls[selected_name]["speedups_vs_triton"]
     result["selected_baseline"] = {
-        "implementation": selected_name,
-        "source": "task_npu_baseline_probe" if selected_name == "torch_npu" else "pytorch_semantic_baseline",
-        "selection_rule": (
-            "Use torch_npu.npu_add_rms_norm only when its output passes the same "
-            "BF16 CANN-Bench precision check; otherwise use the Torch semantic baseline."
-        ),
-        "active_window_us": impls[selected_name]["active_window_us"],
-        "active_window": impls[selected_name]["active_window"],
-        "kernel_sum_us": impls[selected_name]["kernel_sum_us"],
-        "kernel_sum": impls[selected_name]["kernel_sum"],
-        "latency_us": impls[selected_name]["primary_latency_us"],
-        "latency": impls[selected_name]["primary_latency"],
-        "speedup_vs_triton": selected_speedups["active_vs_active"],
-        "speedup_vs_triton_text": selected_speedups["active_vs_active_text"],
-        "speedups_vs_triton": selected_speedups,
-        "perf_metric_strategy": impls[selected_name]["perf_metric_strategy"],
-        "measurement_scope": impls[selected_name]["measurement_scope"],
-        "elapsed_us_source": impls[selected_name]["elapsed_us_source"],
+        "implementation":
+        selected_name,
+        "source":
+        "task_npu_baseline_probe" if selected_name == "torch_npu" else "pytorch_semantic_baseline",
+        "selection_rule": ("Use torch_npu.npu_add_rms_norm only when its output passes the same "
+                           "BF16 CANN-Bench precision check; otherwise use the Torch semantic baseline."),
+        "active_window_us":
+        impls[selected_name]["active_window_us"],
+        "active_window":
+        impls[selected_name]["active_window"],
+        "kernel_sum_us":
+        impls[selected_name]["kernel_sum_us"],
+        "kernel_sum":
+        impls[selected_name]["kernel_sum"],
+        "latency_us":
+        impls[selected_name]["primary_latency_us"],
+        "latency":
+        impls[selected_name]["primary_latency"],
+        "speedup_vs_triton":
+        selected_speedups["active_vs_active"],
+        "speedup_vs_triton_text":
+        selected_speedups["active_vs_active_text"],
+        "speedups_vs_triton":
+        selected_speedups,
+        "perf_metric_strategy":
+        impls[selected_name]["perf_metric_strategy"],
+        "measurement_scope":
+        impls[selected_name]["measurement_scope"],
+        "elapsed_us_source":
+        impls[selected_name]["elapsed_us_source"],
     }
     return result
 
@@ -1125,8 +1131,7 @@ def print_case(record: dict[str, object], total: int) -> None:
         f"torch_source={torch_impl['elapsed_us_source']} "
         f"torch_kernel_source=baseline_active_window.device_kernel_duration_sum_us "
         f"torch_npu_source={torch_npu_impl['elapsed_us_source']} "
-        f"torch_npu_kernel_source=baseline_active_window.device_kernel_duration_sum_us"
-    )
+        f"torch_npu_kernel_source=baseline_active_window.device_kernel_duration_sum_us")
 
 
 def summarize(records: list[dict[str, object]]) -> None:
@@ -1139,8 +1144,7 @@ def summarize(records: list[dict[str, object]]) -> None:
         f"torch_npu_accuracy_pass={torch_npu_acc_pass}/{len(records)} "
         f"selected_task_npu_baseline={torch_npu_acc_pass} selected_torch_fallback={len(records) - torch_npu_acc_pass} "
         f"triton_strategy=kernel_details triton_scope=visible_device_active_window "
-        f"baseline_strategy=baseline_active_window baseline_scope=visible_device_active_window"
-    )
+        f"baseline_strategy=baseline_active_window baseline_scope=visible_device_active_window")
     kinds = sorted({str(r["kind"]) for r in records})
     for kind in kinds:
         kind_records = [r for r in records if r["kind"] == kind]
@@ -1186,18 +1190,14 @@ def summarize(records: list[dict[str, object]]) -> None:
     torch_npu_active = collect_impl("torch_npu", "active_window_us")
     torch_npu_kernel = collect_impl("torch_npu", "kernel_sum_us")
     if triton_active:
-        print(
-            f"LATENCY_ACTIVE triton_geomean={geomean(triton_active):.3f} us "
-            f"triton_min={min(triton_active):.3f} us triton_max={max(triton_active):.3f} us "
-            f"torch_geomean={geomean(torch_active):.3f} us "
-            f"torch_npu_geomean={geomean(torch_npu_active):.3f} us"
-        )
-        print(
-            f"LATENCY_KERNEL triton_geomean={geomean(triton_kernel):.3f} us "
-            f"triton_min={min(triton_kernel):.3f} us triton_max={max(triton_kernel):.3f} us "
-            f"torch_geomean={geomean(torch_kernel):.3f} us "
-            f"torch_npu_geomean={geomean(torch_npu_kernel):.3f} us"
-        )
+        print(f"LATENCY_ACTIVE triton_geomean={geomean(triton_active):.3f} us "
+              f"triton_min={min(triton_active):.3f} us triton_max={max(triton_active):.3f} us "
+              f"torch_geomean={geomean(torch_active):.3f} us "
+              f"torch_npu_geomean={geomean(torch_npu_active):.3f} us")
+        print(f"LATENCY_KERNEL triton_geomean={geomean(triton_kernel):.3f} us "
+              f"triton_min={min(triton_kernel):.3f} us triton_max={max(triton_kernel):.3f} us "
+              f"torch_geomean={geomean(torch_kernel):.3f} us "
+              f"torch_npu_geomean={geomean(torch_npu_kernel):.3f} us")
         print(
             "SPEEDUP_MATRIX "
             f"torch_active_vs_active={format_speedup(geomean(collect_speedups('torch', 'active_vs_active')))} "
@@ -1207,17 +1207,19 @@ def summarize(records: list[dict[str, object]]) -> None:
             f"torch_npu_pass_active_vs_active={format_speedup(geomean(collect_speedups('torch_npu', 'active_vs_active', require_pass=True)))} "
             f"torch_npu_pass_kernel_vs_kernel={format_speedup(geomean(collect_speedups('torch_npu', 'kernel_vs_kernel', require_pass=True)))} "
             f"selected_active_vs_active={format_speedup(geomean(collect_selected('active_vs_active')))} "
-            f"selected_kernel_vs_kernel={format_speedup(geomean(collect_selected('kernel_vs_kernel')))}"
-        )
+            f"selected_kernel_vs_kernel={format_speedup(geomean(collect_selected('kernel_vs_kernel')))}")
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Validate AddRmsNorm Triton-Ascend implementation.")
     parser.add_argument("--device", default="npu", help="Torch device, default: npu")
     parser.add_argument("--public", action="store_true", help="Run all 80 public B/S/H cases.")
-    parser.add_argument("--random-generalization", type=int, default=0, help="Run N seeded random non-public shape cases.")
-    parser.add_argument("--random-seed", type=int, default=20260613, help="Seed for random generalization shapes and values.")
-    parser.add_argument("--random-shape-policy", default=RANDOM_GENERALIZATION_POLICY, help="Random generalization shape policy.")
+    parser.add_argument("--random-generalization", type=int, default=0,
+                        help="Run N seeded random non-public shape cases.")
+    parser.add_argument("--random-seed", type=int, default=20260613,
+                        help="Seed for random generalization shapes and values.")
+    parser.add_argument("--random-shape-policy", default=RANDOM_GENERALIZATION_POLICY,
+                        help="Random generalization shape policy.")
     parser.add_argument("--benchmark", action="store_true", help="Use CANN-Bench-style profiler timing.")
     parser.add_argument("--warmup", type=int, default=3)
     parser.add_argument("--repeat", type=int, default=5)
@@ -1244,10 +1246,9 @@ def main() -> None:
                 args.random_generalization,
                 args.random_seed,
                 policy=args.random_shape_policy,
-            )
-        )
+            ))
     if args.max_cases is not None:
-        selected = selected[: args.max_cases]
+        selected = selected[:args.max_cases]
 
     if args.jsonl:
         args.jsonl.parent.mkdir(parents=True, exist_ok=True)
