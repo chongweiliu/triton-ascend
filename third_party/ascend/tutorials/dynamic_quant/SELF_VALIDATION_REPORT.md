@@ -1,77 +1,272 @@
-# DynamicQuant 自验证报告
+# DynamicQuant 算子自验证报告
 
-## 结论
+## 1. 报告说明
 
-- 证据版本：`eval_20260616_233746`。
-- public 正确性：40/40 PASS。
-- OpForge 状态：`PERF_REGRESSION`。
-- 主性能口径：`active_vs_active`。
-- active/active geomean：8.154336x。
-- active regression cases：4, 8, 17。
-- baseline source split：task_npu_baseline=19，pytorch_fallback=21。
-- delivery correctness 自跑：80/80 PASS，public=40，random generalization=40，dst_type 覆盖 int8=40、int4=40。
-- delivery benchmark 自跑：40/40 PASS，debug host elapsed geomean 122.376 us。
+- 单一数值证据源：`logs/dynamic_quant_validation.jsonl`
+- 本报告由当前目录 `generate_delivery.py` 生成，只读取本目录 logs/templates/references。
+- L1 是商业精度等级，不是 L1 norm；本表对齐商业标准中的 MARE/MERE/RMSE 指标口径。
+- 本报告是本目录自验证，不等同于完整商业 L1 认证；完整商业认证还要求标准规定的用例规模和执行轮次。
+- RMSE/MERE/MARE 由本目录 checker 输出。
+- 速度门槛按 `torch_npu runnable all` active/active 几何平均 >= 1.2x；无 torch_npu 可计时 case 标记为 N/A，不用 selected baseline 代替。
+- 截图证据未外置，日志内容嵌入 XLSX `日志证据` 工作表。
+- 不保留、不读取外部历史对照文件。
 
-当前包是候选交付材料，不能写成性能门完全通过。`pytorch_fallback` 是评测基线来源，不是 candidate fallback；candidate measured path 始终是 Triton-Ascend kernel。
-delivery benchmark 的计时是本地 debug host elapsed，不替代 OpForge profiler active-window 主性能证据。
+## 2. 性能总体对比
 
-## 公开用例明细
+| 指标 | 数值 |
+| --- | --- |
+| evidence source | logs/dynamic_quant_validation.jsonl |
+| total cases | 80 |
+| public cases | 40 |
+| random/generalization cases | 40 |
+| candidate pass | 80/80 |
+| main speed sample | torch_npu runnable all (80 cases) |
+| main speed candidate active geomean | 4.192 us |
+| main speed torch_npu active geomean | 5.382 us |
+| main speed active/active geomean speedup | 1.284014x |
+| main speed gate | PASS >= 1.2x |
+| overall selected baseline split | torch_npu=80 |
+| public selected baseline split | torch_npu=40 |
+| overall torch_npu runnable all | 80 |
+| overall torch_npu accuracy pass/fail | 80/0 |
+| torch_npu runnable-all active speedup geomean | 1.284014x |
+| torch_npu runnable-all speed gate | PASS >= 1.2x |
+| public torch_npu runnable all | 40 |
+| public torch_npu accuracy pass/fail | 40/0 |
+| aux public candidate active geomean | 3.963 us |
+| aux public selected baseline active geomean | 5.117 us |
+| aux public selected active/active geomean speedup | 1.291399x |
+| max candidate RMSE (all outputs) | 0.715618 |
+| max candidate output RMSE | 0.715618 |
+| max candidate scale RMSE | 0 |
+| commercial standard | references/commercial_standard.md @ c260c8ab7a9be4823ac8f8a07c60442de9bf141e |
 
-| Case | Shape | dst_type | Baseline | Triton active | Baseline active | Active speedup | Active 回归 | Mismatch |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 1 | (1, 1, 3584) | int8 | task_npu_baseline | 2.750 us | 3.000 us | 1.090909x | 否 | 0 |
-| 2 | (1, 1, 4096) | int8 | task_npu_baseline | 2.750 us | 3.500 us | 1.272727x | 否 | 0 |
-| 3 | (1, 1, 5120) | int8 | task_npu_baseline | 3.000 us | 3.500 us | 1.166667x | 否 | 0 |
-| 4 | (1, 1, 8192) | int8 | task_npu_baseline | 4.250 us | 3.500 us | 0.823529x | 是 | 0 |
-| 5 | (8, 1, 3584) | int8 | task_npu_baseline | 3.000 us | 3.250 us | 1.083333x | 否 | 0 |
-| 6 | (8, 1, 4096) | int8 | task_npu_baseline | 3.000 us | 4.000 us | 1.333333x | 否 | 0 |
-| 7 | (8, 1, 5120) | int8 | task_npu_baseline | 3.500 us | 4.000 us | 1.142857x | 否 | 0 |
-| 8 | (8, 1, 8192) | int8 | task_npu_baseline | 4.250 us | 3.250 us | 0.764706x | 是 | 0 |
-| 9 | (16, 1, 3584) | int8 | task_npu_baseline | 3.250 us | 3.750 us | 1.153846x | 否 | 0 |
-| 10 | (16, 1, 4096) | int8 | task_npu_baseline | 3.250 us | 4.000 us | 1.230769x | 否 | 0 |
-| 11 | (16, 1, 5120) | int8 | task_npu_baseline | 3.250 us | 4.000 us | 1.230769x | 否 | 0 |
-| 12 | (16, 1, 8192) | int8 | task_npu_baseline | 4.500 us | 4.500 us | 1.000000x | 否 | 0 |
-| 13 | (32, 1, 3584) | int8 | pytorch_fallback | 4.000 us | 172.250 us | 43.062500x | 否 | 0 |
-| 14 | (32, 1, 4096) | int8 | task_npu_baseline | 4.000 us | 4.750 us | 1.187500x | 否 | 0 |
-| 15 | (32, 1, 5120) | int8 | task_npu_baseline | 4.250 us | 4.750 us | 1.117647x | 否 | 0 |
-| 16 | (32, 1, 8192) | int8 | task_npu_baseline | 5.250 us | 7.000 us | 1.333333x | 否 | 0 |
-| 17 | (64, 1, 3584) | int8 | task_npu_baseline | 5.500 us | 5.250 us | 0.954545x | 是 | 0 |
-| 18 | (64, 1, 4096) | int8 | task_npu_baseline | 5.750 us | 5.750 us | 1.000000x | 否 | 0 |
-| 19 | (64, 1, 5120) | int8 | task_npu_baseline | 6.000 us | 6.750 us | 1.125000x | 否 | 0 |
-| 20 | (64, 1, 8192) | int8 | task_npu_baseline | 8.500 us | 9.500 us | 1.117647x | 否 | 0 |
-| 21 | (1, 1, 3584) | int4 | pytorch_fallback | 2.750 us | 194.750 us | 70.818182x | 否 | 0 |
-| 22 | (1, 1, 4096) | int4 | pytorch_fallback | 2.750 us | 208.250 us | 75.727273x | 否 | 0 |
-| 23 | (1, 1, 5120) | int4 | pytorch_fallback | 3.000 us | 192.750 us | 64.250000x | 否 | 0 |
-| 24 | (1, 1, 8192) | int4 | pytorch_fallback | 4.000 us | 180.250 us | 45.062500x | 否 | 0 |
-| 25 | (8, 1, 3584) | int4 | pytorch_fallback | 3.000 us | 212.250 us | 70.750000x | 否 | 0 |
-| 26 | (8, 1, 4096) | int4 | pytorch_fallback | 2.750 us | 162.000 us | 58.909091x | 否 | 0 |
-| 27 | (8, 1, 5120) | int4 | pytorch_fallback | 3.000 us | 212.250 us | 70.750000x | 否 | 0 |
-| 28 | (8, 1, 8192) | int4 | pytorch_fallback | 4.250 us | 231.500 us | 54.470588x | 否 | 0 |
-| 29 | (16, 1, 3584) | int4 | pytorch_fallback | 3.250 us | 182.250 us | 56.076923x | 否 | 0 |
-| 30 | (16, 1, 4096) | int4 | pytorch_fallback | 3.250 us | 169.500 us | 52.153846x | 否 | 0 |
-| 31 | (16, 1, 5120) | int4 | pytorch_fallback | 3.500 us | 191.750 us | 54.785714x | 否 | 0 |
-| 32 | (16, 1, 8192) | int4 | pytorch_fallback | 4.500 us | 185.000 us | 41.111111x | 否 | 0 |
-| 33 | (32, 1, 3584) | int4 | pytorch_fallback | 4.000 us | 202.750 us | 50.687500x | 否 | 0 |
-| 34 | (32, 1, 4096) | int4 | pytorch_fallback | 4.000 us | 234.000 us | 58.500000x | 否 | 0 |
-| 35 | (32, 1, 5120) | int4 | pytorch_fallback | 4.000 us | 194.500 us | 48.625000x | 否 | 0 |
-| 36 | (32, 1, 8192) | int4 | pytorch_fallback | 5.250 us | 205.750 us | 39.190476x | 否 | 0 |
-| 37 | (64, 1, 3584) | int4 | pytorch_fallback | 5.500 us | 219.000 us | 39.818182x | 否 | 0 |
-| 38 | (64, 1, 4096) | int4 | pytorch_fallback | 5.750 us | 191.000 us | 33.217391x | 否 | 0 |
-| 39 | (64, 1, 5120) | int4 | pytorch_fallback | 5.750 us | 219.000 us | 38.086956x | 否 | 0 |
-| 40 | (64, 1, 8192) | int4 | pytorch_fallback | 8.500 us | 192.750 us | 22.676471x | 否 | 0 |
+## 3. 性能口径汇总
 
-## 基线来源说明
+| Scope | Cases | Candidate active geomean | Baseline active geomean | Active/active geomean speedup | Precision pass | Note |
+| --- | --- | --- | --- | --- | --- | --- |
+| main torch_npu timed sample | 80 | 4.192 us | 5.382 us | 1.284014x | 80/80 | 主速度验收口径；candidate 和 torch_npu 均只在这同一批有 torch_npu active 计时的 case 上取几何平均；gate >= 1.2x |
+| torch_npu accuracy-pass | 80 | 4.192 us | 5.382 us | 1.284014x | 80/80 | 全量 torch_npu 有效计时且本地 checker PASS 子集 |
+| torch_npu accuracy-fail | 0 | N/A | N/A | N/A | 0/0 | 全量 torch_npu 有效计时但本地 checker FAIL 子集 |
+| aux public selected baseline | 40 | 3.963 us | 5.117 us | 1.291399x | 40/40 | 补充语义标杆口径；torch_npu 仅在本地 checker 通过时选中，否则选 Torch |
+| aux public torch semantic baseline | 40 | 3.963 us | N/A | N/A | 40/40 | 补充 Torch 语义参考口径，始终作为精度语义基准 |
 
-`task_npu_baseline` 表示校准时使用任务 NPU helper 并通过语义校验；`pytorch_fallback` 表示任务校准使用 semantic PyTorch 路径作为基线。DynamicQuant 中 20 个 logical INT4 unpacked-storage case 没有稳定的公开 `torch_npu.npu_dynamic_quant` baseline；另外 case13 的 INT8 helper 校验出现 `max_diff=1`，因此也被标为 `pytorch_fallback`。
+## 4. Baseline 校验明细
 
-## 日志证据
+| Case | Selected implementation | Selection rule | Torch pass | torch_npu runnable | torch_npu pass | torch_npu MERE | torch_npu MARE | torch_npu RMSE | torch_npu max diff | Reason | Seed/attrs |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| custom/dynamic_quant_1 | torch_npu | Use torch_npu only when it runs and passes this directory's precision checker; otherwise use Torch semantic baseline. | PASS | YES | PASS | 7.87402e-09 | 7.87402e-09 | 7.87402e-15 | 7.87402e-15 |  | {"seed": 290946555, "attrs": {"Batch": 1, "HeadDim": 128, "HeadNum": 28, "HiddenSize": 3584, "SequenceLength": 1, "dst_type": "int8"}, "dst_type": "int8", "case_detail": {"Batch": 1, "HeadDim": 128, "HeadNum": 28, "HiddenSize": 3584, "SequenceLength": 1}} |
+| custom/dynamic_quant_2 | torch_npu | Use torch_npu only when it runs and passes this directory's precision checker; otherwise use Torch semantic baseline. | PASS | YES | PASS | 0 | 0 | 0 | 0 |  | {"seed": 517281410, "attrs": {"Batch": 1, "HeadDim": 128, "HeadNum": 32, "HiddenSize": 4096, "SequenceLength": 1, "dst_type": "int8"}, "dst_type": "int8", "case_detail": {"Batch": 1, "HeadDim": 128, "HeadNum": 32, "HiddenSize": 4096, "SequenceLength": 1}} |
+| custom/dynamic_quant_3 | torch_npu | Use torch_npu only when it runs and passes this directory's precision checker; otherwise use Torch semantic baseline. | PASS | YES | PASS | 0 | 0 | 0 | 0 |  | {"seed": 1553757808, "attrs": {"Batch": 1, "HeadDim": 128, "HeadNum": 40, "HiddenSize": 5120, "SequenceLength": 1, "dst_type": "int8"}, "dst_type": "int8", "case_detail": {"Batch": 1, "HeadDim": 128, "HeadNum": 40, "HiddenSize": 5120, "SequenceLength": 1}} |
+| custom/dynamic_quant_4 | torch_npu | Use torch_npu only when it runs and passes this directory's precision checker; otherwise use Torch semantic baseline. | PASS | YES | PASS | 0 | 0 | 0 | 0 |  | {"seed": 1519782940, "attrs": {"Batch": 1, "HeadDim": 128, "HeadNum": 64, "HiddenSize": 8192, "SequenceLength": 1, "dst_type": "int8"}, "dst_type": "int8", "case_detail": {"Batch": 1, "HeadDim": 128, "HeadNum": 64, "HiddenSize": 8192, "SequenceLength": 1}} |
+| custom/dynamic_quant_5 | torch_npu | Use torch_npu only when it runs and passes this directory's precision checker; otherwise use Torch semantic baseline. | PASS | YES | PASS | 0 | 0 | 0 | 0 |  | {"seed": 1693678812, "attrs": {"Batch": 8, "HeadDim": 128, "HeadNum": 28, "HiddenSize": 3584, "SequenceLength": 1, "dst_type": "int8"}, "dst_type": "int8", "case_detail": {"Batch": 8, "HeadDim": 128, "HeadNum": 28, "HiddenSize": 3584, "SequenceLength": 1}} |
+| custom/dynamic_quant_6 | torch_npu | Use torch_npu only when it runs and passes this directory's precision checker; otherwise use Torch semantic baseline. | PASS | YES | PASS | 0 | 0 | 0 | 0 |  | {"seed": 295208901, "attrs": {"Batch": 8, "HeadDim": 128, "HeadNum": 32, "HiddenSize": 4096, "SequenceLength": 1, "dst_type": "int8"}, "dst_type": "int8", "case_detail": {"Batch": 8, "HeadDim": 128, "HeadNum": 32, "HiddenSize": 4096, "SequenceLength": 1}} |
+| custom/dynamic_quant_7 | torch_npu | Use torch_npu only when it runs and passes this directory's precision checker; otherwise use Torch semantic baseline. | PASS | YES | PASS | 0 | 0 | 0 | 0 |  | {"seed": 715257418, "attrs": {"Batch": 8, "HeadDim": 128, "HeadNum": 40, "HiddenSize": 5120, "SequenceLength": 1, "dst_type": "int8"}, "dst_type": "int8", "case_detail": {"Batch": 8, "HeadDim": 128, "HeadNum": 40, "HiddenSize": 5120, "SequenceLength": 1}} |
+| custom/dynamic_quant_8 | torch_npu | Use torch_npu only when it runs and passes this directory's precision checker; otherwise use Torch semantic baseline. | PASS | YES | PASS | 7.87402e-09 | 7.87402e-09 | 7.87402e-15 | 7.87402e-15 |  | {"seed": 1533416434, "attrs": {"Batch": 8, "HeadDim": 128, "HeadNum": 64, "HiddenSize": 8192, "SequenceLength": 1, "dst_type": "int8"}, "dst_type": "int8", "case_detail": {"Batch": 8, "HeadDim": 128, "HeadNum": 64, "HiddenSize": 8192, "SequenceLength": 1}} |
+| custom/dynamic_quant_9 | torch_npu | Use torch_npu only when it runs and passes this directory's precision checker; otherwise use Torch semantic baseline. | PASS | YES | PASS | 0 | 0 | 0 | 0 |  | {"seed": 788628000, "attrs": {"Batch": 16, "HeadDim": 128, "HeadNum": 28, "HiddenSize": 3584, "SequenceLength": 1, "dst_type": "int8"}, "dst_type": "int8", "case_detail": {"Batch": 16, "HeadDim": 128, "HeadNum": 28, "HiddenSize": 3584, "SequenceLength": 1}} |
+| custom/dynamic_quant_10 | torch_npu | Use torch_npu only when it runs and passes this directory's precision checker; otherwise use Torch semantic baseline. | PASS | YES | PASS | 0 | 0 | 0 | 0 |  | {"seed": 958483133, "attrs": {"Batch": 16, "HeadDim": 128, "HeadNum": 32, "HiddenSize": 4096, "SequenceLength": 1, "dst_type": "int8"}, "dst_type": "int8", "case_detail": {"Batch": 16, "HeadDim": 128, "HeadNum": 32, "HiddenSize": 4096, "SequenceLength": 1}} |
+| custom/dynamic_quant_11 | torch_npu | Use torch_npu only when it runs and passes this directory's precision checker; otherwise use Torch semantic baseline. | PASS | YES | PASS | 0 | 0 | 0 | 0 |  | {"seed": 1953412913, "attrs": {"Batch": 16, "HeadDim": 128, "HeadNum": 40, "HiddenSize": 5120, "SequenceLength": 1, "dst_type": "int8"}, "dst_type": "int8", "case_detail": {"Batch": 16, "HeadDim": 128, "HeadNum": 40, "HiddenSize": 5120, "SequenceLength": 1}} |
+| custom/dynamic_quant_12 | torch_npu | Use torch_npu only when it runs and passes this directory's precision checker; otherwise use Torch semantic baseline. | PASS | YES | PASS | 0 | 0 | 0 | 0 |  | {"seed": 861259166, "attrs": {"Batch": 16, "HeadDim": 128, "HeadNum": 64, "HiddenSize": 8192, "SequenceLength": 1, "dst_type": "int8"}, "dst_type": "int8", "case_detail": {"Batch": 16, "HeadDim": 128, "HeadNum": 64, "HiddenSize": 8192, "SequenceLength": 1}} |
+| custom/dynamic_quant_13 | torch_npu | Use torch_npu only when it runs and passes this directory's precision checker; otherwise use Torch semantic baseline. | PASS | YES | PASS | 0 | 0 | 0 | 0 |  | {"seed": 603824714, "attrs": {"Batch": 32, "HeadDim": 128, "HeadNum": 28, "HiddenSize": 3584, "SequenceLength": 1, "dst_type": "int8"}, "dst_type": "int8", "case_detail": {"Batch": 32, "HeadDim": 128, "HeadNum": 28, "HiddenSize": 3584, "SequenceLength": 1}} |
+| custom/dynamic_quant_14 | torch_npu | Use torch_npu only when it runs and passes this directory's precision checker; otherwise use Torch semantic baseline. | PASS | YES | PASS | 0 | 0 | 0 | 0 |  | {"seed": 1234808994, "attrs": {"Batch": 32, "HeadDim": 128, "HeadNum": 32, "HiddenSize": 4096, "SequenceLength": 1, "dst_type": "int8"}, "dst_type": "int8", "case_detail": {"Batch": 32, "HeadDim": 128, "HeadNum": 32, "HiddenSize": 4096, "SequenceLength": 1}} |
+| custom/dynamic_quant_15 | torch_npu | Use torch_npu only when it runs and passes this directory's precision checker; otherwise use Torch semantic baseline. | PASS | YES | PASS | 7.87402e-09 | 7.87402e-09 | 7.87402e-15 | 7.87402e-15 |  | {"seed": 1122073957, "attrs": {"Batch": 32, "HeadDim": 128, "HeadNum": 40, "HiddenSize": 5120, "SequenceLength": 1, "dst_type": "int8"}, "dst_type": "int8", "case_detail": {"Batch": 32, "HeadDim": 128, "HeadNum": 40, "HiddenSize": 5120, "SequenceLength": 1}} |
+| custom/dynamic_quant_16 | torch_npu | Use torch_npu only when it runs and passes this directory's precision checker; otherwise use Torch semantic baseline. | PASS | YES | PASS | 0 | 0 | 0 | 0 |  | {"seed": 1572320534, "attrs": {"Batch": 32, "HeadDim": 128, "HeadNum": 64, "HiddenSize": 8192, "SequenceLength": 1, "dst_type": "int8"}, "dst_type": "int8", "case_detail": {"Batch": 32, "HeadDim": 128, "HeadNum": 64, "HiddenSize": 8192, "SequenceLength": 1}} |
+| custom/dynamic_quant_17 | torch_npu | Use torch_npu only when it runs and passes this directory's precision checker; otherwise use Torch semantic baseline. | PASS | YES | PASS | 0 | 0 | 0 | 0 |  | {"seed": 484232680, "attrs": {"Batch": 64, "HeadDim": 128, "HeadNum": 28, "HiddenSize": 3584, "SequenceLength": 1, "dst_type": "int8"}, "dst_type": "int8", "case_detail": {"Batch": 64, "HeadDim": 128, "HeadNum": 28, "HiddenSize": 3584, "SequenceLength": 1}} |
+| custom/dynamic_quant_18 | torch_npu | Use torch_npu only when it runs and passes this directory's precision checker; otherwise use Torch semantic baseline. | PASS | YES | PASS | 0 | 0 | 0 | 0 |  | {"seed": 1107036625, "attrs": {"Batch": 64, "HeadDim": 128, "HeadNum": 32, "HiddenSize": 4096, "SequenceLength": 1, "dst_type": "int8"}, "dst_type": "int8", "case_detail": {"Batch": 64, "HeadDim": 128, "HeadNum": 32, "HiddenSize": 4096, "SequenceLength": 1}} |
+| custom/dynamic_quant_19 | torch_npu | Use torch_npu only when it runs and passes this directory's precision checker; otherwise use Torch semantic baseline. | PASS | YES | PASS | 0 | 0 | 0 | 0 |  | {"seed": 366523540, "attrs": {"Batch": 64, "HeadDim": 128, "HeadNum": 40, "HiddenSize": 5120, "SequenceLength": 1, "dst_type": "int8"}, "dst_type": "int8", "case_detail": {"Batch": 64, "HeadDim": 128, "HeadNum": 40, "HiddenSize": 5120, "SequenceLength": 1}} |
+| custom/dynamic_quant_20 | torch_npu | Use torch_npu only when it runs and passes this directory's precision checker; otherwise use Torch semantic baseline. | PASS | YES | PASS | 0 | 0 | 0 | 0 |  | {"seed": 9819431, "attrs": {"Batch": 64, "HeadDim": 128, "HeadNum": 64, "HiddenSize": 8192, "SequenceLength": 1, "dst_type": "int8"}, "dst_type": "int8", "case_detail": {"Batch": 64, "HeadDim": 128, "HeadNum": 64, "HiddenSize": 8192, "SequenceLength": 1}} |
+| custom/dynamic_quant_21 | torch_npu | Use torch_npu only when it runs and passes this directory's precision checker; otherwise use Torch semantic baseline. | PASS | YES | PASS | 1.42857e-07 | 1.42857e-07 | 1.42857e-13 | 1.42857e-13 |  | {"seed": 1872290961, "attrs": {"Batch": 1, "HeadDim": 128, "HeadNum": 28, "HiddenSize": 3584, "SequenceLength": 1, "dst_type": "int4"}, "dst_type": "int4", "case_detail": {"Batch": 1, "HeadDim": 128, "HeadNum": 28, "HiddenSize": 3584, "SequenceLength": 1}} |
+| custom/dynamic_quant_22 | torch_npu | Use torch_npu only when it runs and passes this directory's precision checker; otherwise use Torch semantic baseline. | PASS | YES | PASS | 0 | 0 | 0 | 0 |  | {"seed": 754747769, "attrs": {"Batch": 1, "HeadDim": 128, "HeadNum": 32, "HiddenSize": 4096, "SequenceLength": 1, "dst_type": "int4"}, "dst_type": "int4", "case_detail": {"Batch": 1, "HeadDim": 128, "HeadNum": 32, "HiddenSize": 4096, "SequenceLength": 1}} |
+| custom/dynamic_quant_23 | torch_npu | Use torch_npu only when it runs and passes this directory's precision checker; otherwise use Torch semantic baseline. | PASS | YES | PASS | 0 | 0 | 0 | 0 |  | {"seed": 1497542212, "attrs": {"Batch": 1, "HeadDim": 128, "HeadNum": 40, "HiddenSize": 5120, "SequenceLength": 1, "dst_type": "int4"}, "dst_type": "int4", "case_detail": {"Batch": 1, "HeadDim": 128, "HeadNum": 40, "HiddenSize": 5120, "SequenceLength": 1}} |
+| custom/dynamic_quant_24 | torch_npu | Use torch_npu only when it runs and passes this directory's precision checker; otherwise use Torch semantic baseline. | PASS | YES | PASS | 0 | 0 | 0 | 0 |  | {"seed": 525113986, "attrs": {"Batch": 1, "HeadDim": 128, "HeadNum": 64, "HiddenSize": 8192, "SequenceLength": 1, "dst_type": "int4"}, "dst_type": "int4", "case_detail": {"Batch": 1, "HeadDim": 128, "HeadNum": 64, "HiddenSize": 8192, "SequenceLength": 1}} |
+| custom/dynamic_quant_25 | torch_npu | Use torch_npu only when it runs and passes this directory's precision checker; otherwise use Torch semantic baseline. | PASS | YES | PASS | 0 | 0 | 0 | 0 |  | {"seed": 833686457, "attrs": {"Batch": 8, "HeadDim": 128, "HeadNum": 28, "HiddenSize": 3584, "SequenceLength": 1, "dst_type": "int4"}, "dst_type": "int4", "case_detail": {"Batch": 8, "HeadDim": 128, "HeadNum": 28, "HiddenSize": 3584, "SequenceLength": 1}} |
+| custom/dynamic_quant_26 | torch_npu | Use torch_npu only when it runs and passes this directory's precision checker; otherwise use Torch semantic baseline. | PASS | YES | PASS | 0 | 0 | 0 | 0 |  | {"seed": 1169915283, "attrs": {"Batch": 8, "HeadDim": 128, "HeadNum": 32, "HiddenSize": 4096, "SequenceLength": 1, "dst_type": "int4"}, "dst_type": "int4", "case_detail": {"Batch": 8, "HeadDim": 128, "HeadNum": 32, "HiddenSize": 4096, "SequenceLength": 1}} |
+| custom/dynamic_quant_27 | torch_npu | Use torch_npu only when it runs and passes this directory's precision checker; otherwise use Torch semantic baseline. | PASS | YES | PASS | 0 | 0 | 0 | 0 |  | {"seed": 574724603, "attrs": {"Batch": 8, "HeadDim": 128, "HeadNum": 40, "HiddenSize": 5120, "SequenceLength": 1, "dst_type": "int4"}, "dst_type": "int4", "case_detail": {"Batch": 8, "HeadDim": 128, "HeadNum": 40, "HiddenSize": 5120, "SequenceLength": 1}} |
+| custom/dynamic_quant_28 | torch_npu | Use torch_npu only when it runs and passes this directory's precision checker; otherwise use Torch semantic baseline. | PASS | YES | PASS | 1.42857e-07 | 1.42857e-07 | 1.42857e-13 | 1.42857e-13 |  | {"seed": 1477014784, "attrs": {"Batch": 8, "HeadDim": 128, "HeadNum": 64, "HiddenSize": 8192, "SequenceLength": 1, "dst_type": "int4"}, "dst_type": "int4", "case_detail": {"Batch": 8, "HeadDim": 128, "HeadNum": 64, "HiddenSize": 8192, "SequenceLength": 1}} |
+| custom/dynamic_quant_29 | torch_npu | Use torch_npu only when it runs and passes this directory's precision checker; otherwise use Torch semantic baseline. | PASS | YES | PASS | 0 | 0 | 0 | 0 |  | {"seed": 607314940, "attrs": {"Batch": 16, "HeadDim": 128, "HeadNum": 28, "HiddenSize": 3584, "SequenceLength": 1, "dst_type": "int4"}, "dst_type": "int4", "case_detail": {"Batch": 16, "HeadDim": 128, "HeadNum": 28, "HiddenSize": 3584, "SequenceLength": 1}} |
+| custom/dynamic_quant_30 | torch_npu | Use torch_npu only when it runs and passes this directory's precision checker; otherwise use Torch semantic baseline. | PASS | YES | PASS | 0 | 0 | 0 | 0 |  | {"seed": 437729554, "attrs": {"Batch": 16, "HeadDim": 128, "HeadNum": 32, "HiddenSize": 4096, "SequenceLength": 1, "dst_type": "int4"}, "dst_type": "int4", "case_detail": {"Batch": 16, "HeadDim": 128, "HeadNum": 32, "HiddenSize": 4096, "SequenceLength": 1}} |
+| custom/dynamic_quant_31 | torch_npu | Use torch_npu only when it runs and passes this directory's precision checker; otherwise use Torch semantic baseline. | PASS | YES | PASS | 0 | 0 | 0 | 0 |  | {"seed": 977094068, "attrs": {"Batch": 16, "HeadDim": 128, "HeadNum": 40, "HiddenSize": 5120, "SequenceLength": 1, "dst_type": "int4"}, "dst_type": "int4", "case_detail": {"Batch": 16, "HeadDim": 128, "HeadNum": 40, "HiddenSize": 5120, "SequenceLength": 1}} |
+| custom/dynamic_quant_32 | torch_npu | Use torch_npu only when it runs and passes this directory's precision checker; otherwise use Torch semantic baseline. | PASS | YES | PASS | 0 | 0 | 0 | 0 |  | {"seed": 516721451, "attrs": {"Batch": 16, "HeadDim": 128, "HeadNum": 64, "HiddenSize": 8192, "SequenceLength": 1, "dst_type": "int4"}, "dst_type": "int4", "case_detail": {"Batch": 16, "HeadDim": 128, "HeadNum": 64, "HiddenSize": 8192, "SequenceLength": 1}} |
+| custom/dynamic_quant_33 | torch_npu | Use torch_npu only when it runs and passes this directory's precision checker; otherwise use Torch semantic baseline. | PASS | YES | PASS | 0 | 0 | 0 | 0 |  | {"seed": 1170163291, "attrs": {"Batch": 32, "HeadDim": 128, "HeadNum": 28, "HiddenSize": 3584, "SequenceLength": 1, "dst_type": "int4"}, "dst_type": "int4", "case_detail": {"Batch": 32, "HeadDim": 128, "HeadNum": 28, "HiddenSize": 3584, "SequenceLength": 1}} |
+| custom/dynamic_quant_34 | torch_npu | Use torch_npu only when it runs and passes this directory's precision checker; otherwise use Torch semantic baseline. | PASS | YES | PASS | 0 | 0 | 0 | 0 |  | {"seed": 1909845499, "attrs": {"Batch": 32, "HeadDim": 128, "HeadNum": 32, "HiddenSize": 4096, "SequenceLength": 1, "dst_type": "int4"}, "dst_type": "int4", "case_detail": {"Batch": 32, "HeadDim": 128, "HeadNum": 32, "HiddenSize": 4096, "SequenceLength": 1}} |
+| custom/dynamic_quant_35 | torch_npu | Use torch_npu only when it runs and passes this directory's precision checker; otherwise use Torch semantic baseline. | PASS | YES | PASS | 1.42857e-07 | 1.42857e-07 | 1.42857e-13 | 1.42857e-13 |  | {"seed": 1543752005, "attrs": {"Batch": 32, "HeadDim": 128, "HeadNum": 40, "HiddenSize": 5120, "SequenceLength": 1, "dst_type": "int4"}, "dst_type": "int4", "case_detail": {"Batch": 32, "HeadDim": 128, "HeadNum": 40, "HiddenSize": 5120, "SequenceLength": 1}} |
+| custom/dynamic_quant_36 | torch_npu | Use torch_npu only when it runs and passes this directory's precision checker; otherwise use Torch semantic baseline. | PASS | YES | PASS | 0 | 0 | 0 | 0 |  | {"seed": 817577730, "attrs": {"Batch": 32, "HeadDim": 128, "HeadNum": 64, "HiddenSize": 8192, "SequenceLength": 1, "dst_type": "int4"}, "dst_type": "int4", "case_detail": {"Batch": 32, "HeadDim": 128, "HeadNum": 64, "HiddenSize": 8192, "SequenceLength": 1}} |
+| custom/dynamic_quant_37 | torch_npu | Use torch_npu only when it runs and passes this directory's precision checker; otherwise use Torch semantic baseline. | PASS | YES | PASS | 0 | 0 | 0 | 0 |  | {"seed": 783582863, "attrs": {"Batch": 64, "HeadDim": 128, "HeadNum": 28, "HiddenSize": 3584, "SequenceLength": 1, "dst_type": "int4"}, "dst_type": "int4", "case_detail": {"Batch": 64, "HeadDim": 128, "HeadNum": 28, "HiddenSize": 3584, "SequenceLength": 1}} |
+| custom/dynamic_quant_38 | torch_npu | Use torch_npu only when it runs and passes this directory's precision checker; otherwise use Torch semantic baseline. | PASS | YES | PASS | 0 | 0 | 0 | 0 |  | {"seed": 654189849, "attrs": {"Batch": 64, "HeadDim": 128, "HeadNum": 32, "HiddenSize": 4096, "SequenceLength": 1, "dst_type": "int4"}, "dst_type": "int4", "case_detail": {"Batch": 64, "HeadDim": 128, "HeadNum": 32, "HiddenSize": 4096, "SequenceLength": 1}} |
+| custom/dynamic_quant_39 | torch_npu | Use torch_npu only when it runs and passes this directory's precision checker; otherwise use Torch semantic baseline. | PASS | YES | PASS | 0 | 0 | 0 | 0 |  | {"seed": 543681792, "attrs": {"Batch": 64, "HeadDim": 128, "HeadNum": 40, "HiddenSize": 5120, "SequenceLength": 1, "dst_type": "int4"}, "dst_type": "int4", "case_detail": {"Batch": 64, "HeadDim": 128, "HeadNum": 40, "HiddenSize": 5120, "SequenceLength": 1}} |
+| custom/dynamic_quant_40 | torch_npu | Use torch_npu only when it runs and passes this directory's precision checker; otherwise use Torch semantic baseline. | PASS | YES | PASS | 0 | 0 | 0 | 0 |  | {"seed": 156727975, "attrs": {"Batch": 64, "HeadDim": 128, "HeadNum": 64, "HiddenSize": 8192, "SequenceLength": 1, "dst_type": "int4"}, "dst_type": "int4", "case_detail": {"Batch": 64, "HeadDim": 128, "HeadNum": 64, "HiddenSize": 8192, "SequenceLength": 1}} |
 
-- `logs/opforge_eval_20260616_233746_summary.json`
-- `logs/opforge_eval_20260616_233746_traces.jsonl`
-- `logs/opforge_eval_20260616_233746_main_results.csv`
-- `logs/opforge_eval_20260616_233746_timing_summary.json`
-- `logs/opforge_dynamic_quant_golden_baseline.json`
-- `logs/dynamic_quant_validation_20260617_155614.log`
-- `logs/dynamic_quant_validation_20260617_155614.summary.json`
-- `logs/dynamic_quant_benchmark_20260617_155312.log`
-- `logs/dynamic_quant_benchmark_20260617_155312.summary.json`
+## 5. Public 逐Case速度
+
+| Case | Kind | Shape | DType | Selected baseline | Triton active | Torch active | torch_npu active | Selected active speedup | Torch active speedup | torch_npu active speedup | Triton precision | Torch precision | torch_npu precision | MERE | MARE | RMSE | Max diff | torch_npu error/note |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| custom/dynamic_quant_1 | public | [1, 1, 3584] | bfloat16 | torch_npu | 2.500 us | N/A | 3.750 us | 1.500000x | N/A | 1.500000x | PASS | PASS | PASS | 0 | 0 | 0 | 0 |  |
+| custom/dynamic_quant_2 | public | [1, 1, 4096] | bfloat16 | torch_npu | 2.500 us | N/A | 4.000 us | 1.600000x | N/A | 1.600000x | PASS | PASS | PASS | 0 | 0 | 0.703993 | 1 |  |
+| custom/dynamic_quant_3 | public | [1, 1, 5120] | bfloat16 | torch_npu | 2.750 us | N/A | 3.750 us | 1.363636x | N/A | 1.363636x | PASS | PASS | PASS | 0 | 0 | 0.715618 | 1 |  |
+| custom/dynamic_quant_4 | public | [1, 1, 8192] | bfloat16 | torch_npu | 4.000 us | N/A | 4.000 us | 1.000000x | N/A | 1.000000x | PASS | PASS | PASS | 0 | 0 | 0.704686 | 1 |  |
+| custom/dynamic_quant_5 | public | [8, 1, 3584] | bfloat16 | torch_npu | 3.500 us | N/A | 5.750 us | 1.642857x | N/A | 1.642857x | PASS | PASS | PASS | 0 | 0 | 0.705082 | 1 |  |
+| custom/dynamic_quant_6 | public | [8, 1, 4096] | bfloat16 | torch_npu | 3.750 us | N/A | 4.500 us | 1.200000x | N/A | 1.200000x | PASS | PASS | PASS | 0 | 0 | 0.71201 | 1 |  |
+| custom/dynamic_quant_7 | public | [8, 1, 5120] | bfloat16 | torch_npu | 3.750 us | N/A | 4.500 us | 1.200000x | N/A | 1.200000x | PASS | PASS | PASS | 0 | 0 | 0.711564 | 1 |  |
+| custom/dynamic_quant_8 | public | [8, 1, 8192] | bfloat16 | torch_npu | 5.000 us | N/A | 5.000 us | 1.000000x | N/A | 1.000000x | PASS | PASS | PASS | 0 | 0 | 0 | 0 |  |
+| custom/dynamic_quant_9 | public | [16, 1, 3584] | bfloat16 | torch_npu | 3.250 us | N/A | 4.500 us | 1.384615x | N/A | 1.384615x | PASS | PASS | PASS | 0 | 0 | 0.707057 | 1 |  |
+| custom/dynamic_quant_10 | public | [16, 1, 4096] | bfloat16 | torch_npu | 3.250 us | N/A | 4.750 us | 1.461538x | N/A | 1.461538x | PASS | PASS | PASS | 0 | 0 | 0.70742 | 1 |  |
+| custom/dynamic_quant_11 | public | [16, 1, 5120] | bfloat16 | torch_npu | 3.250 us | N/A | 4.750 us | 1.461538x | N/A | 1.461538x | PASS | PASS | PASS | 0 | 0 | 0.709958 | 1 |  |
+| custom/dynamic_quant_12 | public | [16, 1, 8192] | bfloat16 | torch_npu | 4.500 us | N/A | 4.750 us | 1.055556x | N/A | 1.055556x | PASS | PASS | PASS | 0 | 0 | 0.707727 | 1 |  |
+| custom/dynamic_quant_13 | public | [32, 1, 3584] | bfloat16 | torch_npu | 3.750 us | N/A | 5.250 us | 1.400000x | N/A | 1.400000x | PASS | PASS | PASS | 0 | 0 | 0.707828 | 1 |  |
+| custom/dynamic_quant_14 | public | [32, 1, 4096] | bfloat16 | torch_npu | 4.000 us | N/A | 5.250 us | 1.312500x | N/A | 1.312500x | PASS | PASS | PASS | 0 | 0 | 0.707932 | 1 |  |
+| custom/dynamic_quant_15 | public | [32, 1, 5120] | bfloat16 | torch_npu | 3.750 us | N/A | 5.250 us | 1.400000x | N/A | 1.400000x | PASS | PASS | PASS | 0 | 0 | 0 | 0 |  |
+| custom/dynamic_quant_16 | public | [32, 1, 8192] | bfloat16 | torch_npu | 5.250 us | N/A | 7.750 us | 1.476190x | N/A | 1.476190x | PASS | PASS | PASS | 0 | 0 | 0.705973 | 1 |  |
+| custom/dynamic_quant_17 | public | [64, 1, 3584] | bfloat16 | torch_npu | 5.000 us | N/A | 5.500 us | 1.100000x | N/A | 1.100000x | PASS | PASS | PASS | 0 | 0 | 0.707708 | 1 |  |
+| custom/dynamic_quant_18 | public | [64, 1, 4096] | bfloat16 | torch_npu | 5.250 us | N/A | 6.000 us | 1.142857x | N/A | 1.142857x | PASS | PASS | PASS | 0 | 0 | 0.708842 | 1 |  |
+| custom/dynamic_quant_19 | public | [64, 1, 5120] | bfloat16 | torch_npu | 5.250 us | N/A | 6.500 us | 1.238095x | N/A | 1.238095x | PASS | PASS | PASS | 0 | 0 | 0.707025 | 1 |  |
+| custom/dynamic_quant_20 | public | [64, 1, 8192] | bfloat16 | torch_npu | 8.000 us | N/A | 10.500 us | 1.312500x | N/A | 1.312500x | PASS | PASS | PASS | 0 | 0 | 0.708947 | 1 |  |
+| custom/dynamic_quant_21 | public | [1, 1, 3584] | bfloat16 | torch_npu | 2.750 us | N/A | 3.250 us | 1.181818x | N/A | 1.181818x | PASS | PASS | PASS | 0 | 0 | 0 | 0 |  |
+| custom/dynamic_quant_22 | public | [1, 1, 4096] | bfloat16 | torch_npu | 2.500 us | N/A | 3.250 us | 1.300000x | N/A | 1.300000x | PASS | PASS | PASS | 0 | 0 | 0.714321 | 1 |  |
+| custom/dynamic_quant_23 | public | [1, 1, 5120] | bfloat16 | torch_npu | 2.750 us | N/A | 3.500 us | 1.272727x | N/A | 1.272727x | PASS | PASS | PASS | 0 | 0 | 0.7089 | 1 |  |
+| custom/dynamic_quant_24 | public | [1, 1, 8192] | bfloat16 | torch_npu | 4.000 us | N/A | 3.750 us | 0.937500x | N/A | 0.937500x | PASS | PASS | PASS | 0 | 0 | 0.702604 | 1 |  |
+| custom/dynamic_quant_25 | public | [8, 1, 3584] | bfloat16 | torch_npu | 3.750 us | N/A | 4.500 us | 1.200000x | N/A | 1.200000x | PASS | PASS | PASS | 0 | 0 | 0.708585 | 1 |  |
+| custom/dynamic_quant_26 | public | [8, 1, 4096] | bfloat16 | torch_npu | 3.750 us | N/A | 5.000 us | 1.333333x | N/A | 1.333333x | PASS | PASS | PASS | 0 | 0 | 0.709326 | 1 |  |
+| custom/dynamic_quant_27 | public | [8, 1, 5120] | bfloat16 | torch_npu | 3.750 us | N/A | 5.250 us | 1.400000x | N/A | 1.400000x | PASS | PASS | PASS | 0 | 0 | 0.706813 | 1 |  |
+| custom/dynamic_quant_28 | public | [8, 1, 8192] | bfloat16 | torch_npu | 5.000 us | N/A | 4.500 us | 0.900000x | N/A | 0.900000x | PASS | PASS | PASS | 0 | 0 | 0 | 0 |  |
+| custom/dynamic_quant_29 | public | [16, 1, 3584] | bfloat16 | torch_npu | 3.250 us | N/A | 4.750 us | 1.461538x | N/A | 1.461538x | PASS | PASS | PASS | 0 | 0 | 0.706749 | 1 |  |
+| custom/dynamic_quant_30 | public | [16, 1, 4096] | bfloat16 | torch_npu | 3.250 us | N/A | 5.250 us | 1.615385x | N/A | 1.615385x | PASS | PASS | PASS | 0 | 0 | 0.707042 | 1 |  |
+| custom/dynamic_quant_31 | public | [16, 1, 5120] | bfloat16 | torch_npu | 3.500 us | N/A | 5.000 us | 1.428571x | N/A | 1.428571x | PASS | PASS | PASS | 0 | 0 | 0.705941 | 1 |  |
+| custom/dynamic_quant_32 | public | [16, 1, 8192] | bfloat16 | torch_npu | 4.500 us | N/A | 5.000 us | 1.111111x | N/A | 1.111111x | PASS | PASS | PASS | 0 | 0 | 0.704496 | 1 |  |
+| custom/dynamic_quant_33 | public | [32, 1, 3584] | bfloat16 | torch_npu | 3.500 us | N/A | 5.250 us | 1.500000x | N/A | 1.500000x | PASS | PASS | PASS | 0 | 0 | 0.707341 | 1 |  |
+| custom/dynamic_quant_34 | public | [32, 1, 4096] | bfloat16 | torch_npu | 3.750 us | N/A | 5.500 us | 1.466667x | N/A | 1.466667x | PASS | PASS | PASS | 0 | 0 | 0.706389 | 1 |  |
+| custom/dynamic_quant_35 | public | [32, 1, 5120] | bfloat16 | torch_npu | 4.000 us | N/A | 6.250 us | 1.562500x | N/A | 1.562500x | PASS | PASS | PASS | 0 | 0 | 0 | 0 |  |
+| custom/dynamic_quant_36 | public | [32, 1, 8192] | bfloat16 | torch_npu | 5.250 us | N/A | 7.250 us | 1.380952x | N/A | 1.380952x | PASS | PASS | PASS | 0 | 0 | 0.708037 | 1 |  |
+| custom/dynamic_quant_37 | public | [64, 1, 3584] | bfloat16 | torch_npu | 5.000 us | N/A | 5.250 us | 1.050000x | N/A | 1.050000x | PASS | PASS | PASS | 0 | 0 | 0.707258 | 1 |  |
+| custom/dynamic_quant_38 | public | [64, 1, 4096] | bfloat16 | torch_npu | 5.250 us | N/A | 6.250 us | 1.190476x | N/A | 1.190476x | PASS | PASS | PASS | 0 | 0 | 0.706537 | 1 |  |
+| custom/dynamic_quant_39 | public | [64, 1, 5120] | bfloat16 | torch_npu | 5.250 us | N/A | 6.500 us | 1.238095x | N/A | 1.238095x | PASS | PASS | PASS | 0 | 0 | 0.708368 | 1 |  |
+| custom/dynamic_quant_40 | public | [64, 1, 8192] | bfloat16 | torch_npu | 7.750 us | N/A | 11.250 us | 1.451613x | N/A | 1.451613x | PASS | PASS | PASS | 0 | 0 | 0.706784 | 1 |  |
+
+## 6. 商业L1精度对比
+
+| Case | Output | DType | Shape | Reference | Criterion | Candidate AE | Candidate MARE | Candidate MERE | Candidate RMSE | Baseline AE | Baseline MARE | Baseline MERE | Baseline RMSE | L1 metric status | Checker status | Note |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| custom/dynamic_quant_1 | output | torch.int8 | [1, 1, 3584] | Torch semantic reference generated by this directory | quantized integer AE <= 1 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch_npu; RMSE由本目录 checker 输出 |
+| custom/dynamic_quant_1 | scale | torch.float32 | [1, 1] | Torch semantic reference generated by this directory | floating scale AE <= 1e-3 plus MARE/MERE/RMSE evidence | 0 | 0 | 0 | 0 | 7.87402e-15 | 7.87402e-09 | 7.87402e-09 | 7.87402e-15 | PASS | PASS | baseline=torch_npu; RMSE由本目录 checker 输出 |
+| custom/dynamic_quant_2 | output | torch.int8 | [1, 1, 4096] | Torch semantic reference generated by this directory | quantized integer AE <= 1 | 1 | 0 | 0 | 0.703993 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch_npu; RMSE由本目录 checker 输出 |
+| custom/dynamic_quant_2 | scale | torch.float32 | [1, 1] | Torch semantic reference generated by this directory | floating scale AE <= 1e-3 plus MARE/MERE/RMSE evidence | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch_npu; RMSE由本目录 checker 输出 |
+| custom/dynamic_quant_3 | output | torch.int8 | [1, 1, 5120] | Torch semantic reference generated by this directory | quantized integer AE <= 1 | 1 | 0 | 0 | 0.715618 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch_npu; RMSE由本目录 checker 输出 |
+| custom/dynamic_quant_3 | scale | torch.float32 | [1, 1] | Torch semantic reference generated by this directory | floating scale AE <= 1e-3 plus MARE/MERE/RMSE evidence | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch_npu; RMSE由本目录 checker 输出 |
+| custom/dynamic_quant_4 | output | torch.int8 | [1, 1, 8192] | Torch semantic reference generated by this directory | quantized integer AE <= 1 | 1 | 0 | 0 | 0.704686 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch_npu; RMSE由本目录 checker 输出 |
+| custom/dynamic_quant_4 | scale | torch.float32 | [1, 1] | Torch semantic reference generated by this directory | floating scale AE <= 1e-3 plus MARE/MERE/RMSE evidence | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch_npu; RMSE由本目录 checker 输出 |
+| custom/dynamic_quant_5 | output | torch.int8 | [8, 1, 3584] | Torch semantic reference generated by this directory | quantized integer AE <= 1 | 1 | 0 | 0 | 0.705082 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch_npu; RMSE由本目录 checker 输出 |
+| custom/dynamic_quant_5 | scale | torch.float32 | [8, 1] | Torch semantic reference generated by this directory | floating scale AE <= 1e-3 plus MARE/MERE/RMSE evidence | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch_npu; RMSE由本目录 checker 输出 |
+| custom/dynamic_quant_6 | output | torch.int8 | [8, 1, 4096] | Torch semantic reference generated by this directory | quantized integer AE <= 1 | 1 | 0 | 0 | 0.71201 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch_npu; RMSE由本目录 checker 输出 |
+| custom/dynamic_quant_6 | scale | torch.float32 | [8, 1] | Torch semantic reference generated by this directory | floating scale AE <= 1e-3 plus MARE/MERE/RMSE evidence | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch_npu; RMSE由本目录 checker 输出 |
+| custom/dynamic_quant_7 | output | torch.int8 | [8, 1, 5120] | Torch semantic reference generated by this directory | quantized integer AE <= 1 | 1 | 0 | 0 | 0.711564 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch_npu; RMSE由本目录 checker 输出 |
+| custom/dynamic_quant_7 | scale | torch.float32 | [8, 1] | Torch semantic reference generated by this directory | floating scale AE <= 1e-3 plus MARE/MERE/RMSE evidence | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch_npu; RMSE由本目录 checker 输出 |
+| custom/dynamic_quant_8 | output | torch.int8 | [8, 1, 8192] | Torch semantic reference generated by this directory | quantized integer AE <= 1 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch_npu; RMSE由本目录 checker 输出 |
+| custom/dynamic_quant_8 | scale | torch.float32 | [8, 1] | Torch semantic reference generated by this directory | floating scale AE <= 1e-3 plus MARE/MERE/RMSE evidence | 0 | 0 | 0 | 0 | 7.87402e-15 | 7.87402e-09 | 7.87402e-09 | 7.87402e-15 | PASS | PASS | baseline=torch_npu; RMSE由本目录 checker 输出 |
+| custom/dynamic_quant_9 | output | torch.int8 | [16, 1, 3584] | Torch semantic reference generated by this directory | quantized integer AE <= 1 | 1 | 0 | 0 | 0.707057 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch_npu; RMSE由本目录 checker 输出 |
+| custom/dynamic_quant_9 | scale | torch.float32 | [16, 1] | Torch semantic reference generated by this directory | floating scale AE <= 1e-3 plus MARE/MERE/RMSE evidence | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch_npu; RMSE由本目录 checker 输出 |
+| custom/dynamic_quant_10 | output | torch.int8 | [16, 1, 4096] | Torch semantic reference generated by this directory | quantized integer AE <= 1 | 1 | 0 | 0 | 0.70742 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch_npu; RMSE由本目录 checker 输出 |
+| custom/dynamic_quant_10 | scale | torch.float32 | [16, 1] | Torch semantic reference generated by this directory | floating scale AE <= 1e-3 plus MARE/MERE/RMSE evidence | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch_npu; RMSE由本目录 checker 输出 |
+| custom/dynamic_quant_11 | output | torch.int8 | [16, 1, 5120] | Torch semantic reference generated by this directory | quantized integer AE <= 1 | 1 | 0 | 0 | 0.709958 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch_npu; RMSE由本目录 checker 输出 |
+| custom/dynamic_quant_11 | scale | torch.float32 | [16, 1] | Torch semantic reference generated by this directory | floating scale AE <= 1e-3 plus MARE/MERE/RMSE evidence | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch_npu; RMSE由本目录 checker 输出 |
+| custom/dynamic_quant_12 | output | torch.int8 | [16, 1, 8192] | Torch semantic reference generated by this directory | quantized integer AE <= 1 | 1 | 0 | 0 | 0.707727 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch_npu; RMSE由本目录 checker 输出 |
+| custom/dynamic_quant_12 | scale | torch.float32 | [16, 1] | Torch semantic reference generated by this directory | floating scale AE <= 1e-3 plus MARE/MERE/RMSE evidence | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch_npu; RMSE由本目录 checker 输出 |
+| custom/dynamic_quant_13 | output | torch.int8 | [32, 1, 3584] | Torch semantic reference generated by this directory | quantized integer AE <= 1 | 1 | 0 | 0 | 0.707828 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch_npu; RMSE由本目录 checker 输出 |
+| custom/dynamic_quant_13 | scale | torch.float32 | [32, 1] | Torch semantic reference generated by this directory | floating scale AE <= 1e-3 plus MARE/MERE/RMSE evidence | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch_npu; RMSE由本目录 checker 输出 |
+| custom/dynamic_quant_14 | output | torch.int8 | [32, 1, 4096] | Torch semantic reference generated by this directory | quantized integer AE <= 1 | 1 | 0 | 0 | 0.707932 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch_npu; RMSE由本目录 checker 输出 |
+| custom/dynamic_quant_14 | scale | torch.float32 | [32, 1] | Torch semantic reference generated by this directory | floating scale AE <= 1e-3 plus MARE/MERE/RMSE evidence | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch_npu; RMSE由本目录 checker 输出 |
+| custom/dynamic_quant_15 | output | torch.int8 | [32, 1, 5120] | Torch semantic reference generated by this directory | quantized integer AE <= 1 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch_npu; RMSE由本目录 checker 输出 |
+| custom/dynamic_quant_15 | scale | torch.float32 | [32, 1] | Torch semantic reference generated by this directory | floating scale AE <= 1e-3 plus MARE/MERE/RMSE evidence | 0 | 0 | 0 | 0 | 7.87402e-15 | 7.87402e-09 | 7.87402e-09 | 7.87402e-15 | PASS | PASS | baseline=torch_npu; RMSE由本目录 checker 输出 |
+| custom/dynamic_quant_16 | output | torch.int8 | [32, 1, 8192] | Torch semantic reference generated by this directory | quantized integer AE <= 1 | 1 | 0 | 0 | 0.705973 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch_npu; RMSE由本目录 checker 输出 |
+| custom/dynamic_quant_16 | scale | torch.float32 | [32, 1] | Torch semantic reference generated by this directory | floating scale AE <= 1e-3 plus MARE/MERE/RMSE evidence | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch_npu; RMSE由本目录 checker 输出 |
+| custom/dynamic_quant_17 | output | torch.int8 | [64, 1, 3584] | Torch semantic reference generated by this directory | quantized integer AE <= 1 | 1 | 0 | 0 | 0.707708 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch_npu; RMSE由本目录 checker 输出 |
+| custom/dynamic_quant_17 | scale | torch.float32 | [64, 1] | Torch semantic reference generated by this directory | floating scale AE <= 1e-3 plus MARE/MERE/RMSE evidence | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch_npu; RMSE由本目录 checker 输出 |
+| custom/dynamic_quant_18 | output | torch.int8 | [64, 1, 4096] | Torch semantic reference generated by this directory | quantized integer AE <= 1 | 1 | 0 | 0 | 0.708842 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch_npu; RMSE由本目录 checker 输出 |
+| custom/dynamic_quant_18 | scale | torch.float32 | [64, 1] | Torch semantic reference generated by this directory | floating scale AE <= 1e-3 plus MARE/MERE/RMSE evidence | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch_npu; RMSE由本目录 checker 输出 |
+| custom/dynamic_quant_19 | output | torch.int8 | [64, 1, 5120] | Torch semantic reference generated by this directory | quantized integer AE <= 1 | 1 | 0 | 0 | 0.707025 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch_npu; RMSE由本目录 checker 输出 |
+| custom/dynamic_quant_19 | scale | torch.float32 | [64, 1] | Torch semantic reference generated by this directory | floating scale AE <= 1e-3 plus MARE/MERE/RMSE evidence | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch_npu; RMSE由本目录 checker 输出 |
+| custom/dynamic_quant_20 | output | torch.int8 | [64, 1, 8192] | Torch semantic reference generated by this directory | quantized integer AE <= 1 | 1 | 0 | 0 | 0.708947 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch_npu; RMSE由本目录 checker 输出 |
+| custom/dynamic_quant_20 | scale | torch.float32 | [64, 1] | Torch semantic reference generated by this directory | floating scale AE <= 1e-3 plus MARE/MERE/RMSE evidence | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch_npu; RMSE由本目录 checker 输出 |
+| custom/dynamic_quant_21 | output | torch.int8 | [1, 1, 3584] | Torch semantic reference generated by this directory | quantized integer AE <= 1 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch_npu; RMSE由本目录 checker 输出 |
+| custom/dynamic_quant_21 | scale | torch.float32 | [1, 1] | Torch semantic reference generated by this directory | floating scale AE <= 1e-3 plus MARE/MERE/RMSE evidence | 0 | 0 | 0 | 0 | 1.42857e-13 | 1.42857e-07 | 1.42857e-07 | 1.42857e-13 | PASS | PASS | baseline=torch_npu; RMSE由本目录 checker 输出 |
+| custom/dynamic_quant_22 | output | torch.int8 | [1, 1, 4096] | Torch semantic reference generated by this directory | quantized integer AE <= 1 | 1 | 0 | 0 | 0.714321 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch_npu; RMSE由本目录 checker 输出 |
+| custom/dynamic_quant_22 | scale | torch.float32 | [1, 1] | Torch semantic reference generated by this directory | floating scale AE <= 1e-3 plus MARE/MERE/RMSE evidence | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch_npu; RMSE由本目录 checker 输出 |
+| custom/dynamic_quant_23 | output | torch.int8 | [1, 1, 5120] | Torch semantic reference generated by this directory | quantized integer AE <= 1 | 1 | 0 | 0 | 0.7089 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch_npu; RMSE由本目录 checker 输出 |
+| custom/dynamic_quant_23 | scale | torch.float32 | [1, 1] | Torch semantic reference generated by this directory | floating scale AE <= 1e-3 plus MARE/MERE/RMSE evidence | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch_npu; RMSE由本目录 checker 输出 |
+| custom/dynamic_quant_24 | output | torch.int8 | [1, 1, 8192] | Torch semantic reference generated by this directory | quantized integer AE <= 1 | 1 | 0 | 0 | 0.702604 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch_npu; RMSE由本目录 checker 输出 |
+| custom/dynamic_quant_24 | scale | torch.float32 | [1, 1] | Torch semantic reference generated by this directory | floating scale AE <= 1e-3 plus MARE/MERE/RMSE evidence | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch_npu; RMSE由本目录 checker 输出 |
+| custom/dynamic_quant_25 | output | torch.int8 | [8, 1, 3584] | Torch semantic reference generated by this directory | quantized integer AE <= 1 | 1 | 0 | 0 | 0.708585 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch_npu; RMSE由本目录 checker 输出 |
+| custom/dynamic_quant_25 | scale | torch.float32 | [8, 1] | Torch semantic reference generated by this directory | floating scale AE <= 1e-3 plus MARE/MERE/RMSE evidence | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch_npu; RMSE由本目录 checker 输出 |
+| custom/dynamic_quant_26 | output | torch.int8 | [8, 1, 4096] | Torch semantic reference generated by this directory | quantized integer AE <= 1 | 1 | 0 | 0 | 0.709326 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch_npu; RMSE由本目录 checker 输出 |
+| custom/dynamic_quant_26 | scale | torch.float32 | [8, 1] | Torch semantic reference generated by this directory | floating scale AE <= 1e-3 plus MARE/MERE/RMSE evidence | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch_npu; RMSE由本目录 checker 输出 |
+| custom/dynamic_quant_27 | output | torch.int8 | [8, 1, 5120] | Torch semantic reference generated by this directory | quantized integer AE <= 1 | 1 | 0 | 0 | 0.706813 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch_npu; RMSE由本目录 checker 输出 |
+| custom/dynamic_quant_27 | scale | torch.float32 | [8, 1] | Torch semantic reference generated by this directory | floating scale AE <= 1e-3 plus MARE/MERE/RMSE evidence | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch_npu; RMSE由本目录 checker 输出 |
+| custom/dynamic_quant_28 | output | torch.int8 | [8, 1, 8192] | Torch semantic reference generated by this directory | quantized integer AE <= 1 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch_npu; RMSE由本目录 checker 输出 |
+| custom/dynamic_quant_28 | scale | torch.float32 | [8, 1] | Torch semantic reference generated by this directory | floating scale AE <= 1e-3 plus MARE/MERE/RMSE evidence | 0 | 0 | 0 | 0 | 1.42857e-13 | 1.42857e-07 | 1.42857e-07 | 1.42857e-13 | PASS | PASS | baseline=torch_npu; RMSE由本目录 checker 输出 |
+| custom/dynamic_quant_29 | output | torch.int8 | [16, 1, 3584] | Torch semantic reference generated by this directory | quantized integer AE <= 1 | 1 | 0 | 0 | 0.706749 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch_npu; RMSE由本目录 checker 输出 |
+| custom/dynamic_quant_29 | scale | torch.float32 | [16, 1] | Torch semantic reference generated by this directory | floating scale AE <= 1e-3 plus MARE/MERE/RMSE evidence | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch_npu; RMSE由本目录 checker 输出 |
+| custom/dynamic_quant_30 | output | torch.int8 | [16, 1, 4096] | Torch semantic reference generated by this directory | quantized integer AE <= 1 | 1 | 0 | 0 | 0.707042 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch_npu; RMSE由本目录 checker 输出 |
+| custom/dynamic_quant_30 | scale | torch.float32 | [16, 1] | Torch semantic reference generated by this directory | floating scale AE <= 1e-3 plus MARE/MERE/RMSE evidence | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch_npu; RMSE由本目录 checker 输出 |
+| custom/dynamic_quant_31 | output | torch.int8 | [16, 1, 5120] | Torch semantic reference generated by this directory | quantized integer AE <= 1 | 1 | 0 | 0 | 0.705941 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch_npu; RMSE由本目录 checker 输出 |
+| custom/dynamic_quant_31 | scale | torch.float32 | [16, 1] | Torch semantic reference generated by this directory | floating scale AE <= 1e-3 plus MARE/MERE/RMSE evidence | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch_npu; RMSE由本目录 checker 输出 |
+| custom/dynamic_quant_32 | output | torch.int8 | [16, 1, 8192] | Torch semantic reference generated by this directory | quantized integer AE <= 1 | 1 | 0 | 0 | 0.704496 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch_npu; RMSE由本目录 checker 输出 |
+| custom/dynamic_quant_32 | scale | torch.float32 | [16, 1] | Torch semantic reference generated by this directory | floating scale AE <= 1e-3 plus MARE/MERE/RMSE evidence | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch_npu; RMSE由本目录 checker 输出 |
+| custom/dynamic_quant_33 | output | torch.int8 | [32, 1, 3584] | Torch semantic reference generated by this directory | quantized integer AE <= 1 | 1 | 0 | 0 | 0.707341 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch_npu; RMSE由本目录 checker 输出 |
+| custom/dynamic_quant_33 | scale | torch.float32 | [32, 1] | Torch semantic reference generated by this directory | floating scale AE <= 1e-3 plus MARE/MERE/RMSE evidence | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch_npu; RMSE由本目录 checker 输出 |
+| custom/dynamic_quant_34 | output | torch.int8 | [32, 1, 4096] | Torch semantic reference generated by this directory | quantized integer AE <= 1 | 1 | 0 | 0 | 0.706389 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch_npu; RMSE由本目录 checker 输出 |
+| custom/dynamic_quant_34 | scale | torch.float32 | [32, 1] | Torch semantic reference generated by this directory | floating scale AE <= 1e-3 plus MARE/MERE/RMSE evidence | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch_npu; RMSE由本目录 checker 输出 |
+| custom/dynamic_quant_35 | output | torch.int8 | [32, 1, 5120] | Torch semantic reference generated by this directory | quantized integer AE <= 1 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch_npu; RMSE由本目录 checker 输出 |
+| custom/dynamic_quant_35 | scale | torch.float32 | [32, 1] | Torch semantic reference generated by this directory | floating scale AE <= 1e-3 plus MARE/MERE/RMSE evidence | 0 | 0 | 0 | 0 | 1.42857e-13 | 1.42857e-07 | 1.42857e-07 | 1.42857e-13 | PASS | PASS | baseline=torch_npu; RMSE由本目录 checker 输出 |
+| custom/dynamic_quant_36 | output | torch.int8 | [32, 1, 8192] | Torch semantic reference generated by this directory | quantized integer AE <= 1 | 1 | 0 | 0 | 0.708037 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch_npu; RMSE由本目录 checker 输出 |
+| custom/dynamic_quant_36 | scale | torch.float32 | [32, 1] | Torch semantic reference generated by this directory | floating scale AE <= 1e-3 plus MARE/MERE/RMSE evidence | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch_npu; RMSE由本目录 checker 输出 |
+| custom/dynamic_quant_37 | output | torch.int8 | [64, 1, 3584] | Torch semantic reference generated by this directory | quantized integer AE <= 1 | 1 | 0 | 0 | 0.707258 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch_npu; RMSE由本目录 checker 输出 |
+| custom/dynamic_quant_37 | scale | torch.float32 | [64, 1] | Torch semantic reference generated by this directory | floating scale AE <= 1e-3 plus MARE/MERE/RMSE evidence | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch_npu; RMSE由本目录 checker 输出 |
+| custom/dynamic_quant_38 | output | torch.int8 | [64, 1, 4096] | Torch semantic reference generated by this directory | quantized integer AE <= 1 | 1 | 0 | 0 | 0.706537 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch_npu; RMSE由本目录 checker 输出 |
+| custom/dynamic_quant_38 | scale | torch.float32 | [64, 1] | Torch semantic reference generated by this directory | floating scale AE <= 1e-3 plus MARE/MERE/RMSE evidence | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch_npu; RMSE由本目录 checker 输出 |
+| custom/dynamic_quant_39 | output | torch.int8 | [64, 1, 5120] | Torch semantic reference generated by this directory | quantized integer AE <= 1 | 1 | 0 | 0 | 0.708368 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch_npu; RMSE由本目录 checker 输出 |
+| custom/dynamic_quant_39 | scale | torch.float32 | [64, 1] | Torch semantic reference generated by this directory | floating scale AE <= 1e-3 plus MARE/MERE/RMSE evidence | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch_npu; RMSE由本目录 checker 输出 |
+| custom/dynamic_quant_40 | output | torch.int8 | [64, 1, 8192] | Torch semantic reference generated by this directory | quantized integer AE <= 1 | 1 | 0 | 0 | 0.706784 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch_npu; RMSE由本目录 checker 输出 |
+| custom/dynamic_quant_40 | scale | torch.float32 | [64, 1] | Torch semantic reference generated by this directory | floating scale AE <= 1e-3 plus MARE/MERE/RMSE evidence | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch_npu; RMSE由本目录 checker 输出 |
+
+## 7. 随机泛化明细
+
+| Case | Shape | Category/dst | Seed | Status | Mismatch | Max diff | MERE | MARE | RMSE |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| custom/dynamic_quant_random_001 | [1, 1, 8192] | int8 | 1015585109 | PASS | 0 | 1 | 0 | 0 | 0.712267 |
+| custom/dynamic_quant_random_002 | [1, 1, 5120] | int4 | 1822950086 | PASS | 0 | 1 | 0 | 0 | 0.706969 |
+| custom/dynamic_quant_random_003 | [64, 1, 4096] | int8 | 583040935 | PASS | 0 | 1 | 0 | 0 | 0.70715 |
+| custom/dynamic_quant_random_004 | [8, 1, 5120] | int4 | 1099779966 | PASS | 0 | 1 | 0 | 0 | 0.707469 |
+| custom/dynamic_quant_random_005 | [32, 1, 8192] | int8 | 926932448 | PASS | 0 | 1 | 0 | 0 | 0.708223 |
+| custom/dynamic_quant_random_006 | [64, 1, 3584] | int4 | 1095327137 | PASS | 0 | 0 | 0 | 0 | 0 |
+| custom/dynamic_quant_random_007 | [32, 1, 8192] | int8 | 413481519 | PASS | 0 | 1 | 0 | 0 | 0.708209 |
+| custom/dynamic_quant_random_008 | [8, 1, 4096] | int4 | 483908426 | PASS | 0 | 1 | 0 | 0 | 0.707215 |
+| custom/dynamic_quant_random_009 | [64, 1, 5120] | int8 | 119331736 | PASS | 0 | 1 | 0 | 0 | 0.70704 |
+| custom/dynamic_quant_random_010 | [32, 1, 3584] | int4 | 1678906645 | PASS | 0 | 0 | 0 | 0 | 0 |
+| custom/dynamic_quant_random_011 | [8, 1, 8192] | int8 | 711742197 | PASS | 0 | 1 | 0 | 0 | 0.706113 |
+| custom/dynamic_quant_random_012 | [64, 1, 3584] | int4 | 1484537696 | PASS | 0 | 1 | 0 | 0 | 0.706965 |
+| custom/dynamic_quant_random_013 | [32, 1, 4096] | int8 | 1719934111 | PASS | 0 | 0 | 0 | 0 | 0 |
+| custom/dynamic_quant_random_014 | [64, 1, 8192] | int4 | 2063819961 | PASS | 0 | 1 | 0 | 0 | 0.706207 |
+| custom/dynamic_quant_random_015 | [1, 1, 8192] | int8 | 380564658 | PASS | 0 | 0 | 0 | 0 | 0 |
+| custom/dynamic_quant_random_016 | [32, 1, 5120] | int4 | 107577838 | PASS | 0 | 1 | 0 | 0 | 0.705019 |
+| custom/dynamic_quant_random_017 | [64, 1, 5120] | int8 | 1524914795 | PASS | 0 | 1 | 0 | 0 | 0.708032 |
+| custom/dynamic_quant_random_018 | [1, 1, 5120] | int4 | 1495431921 | PASS | 0 | 1 | 0 | 0 | 0.711101 |
+| custom/dynamic_quant_random_019 | [32, 1, 4096] | int8 | 1002509468 | PASS | 0 | 1 | 0 | 0 | 0.709052 |
+| custom/dynamic_quant_random_020 | [32, 1, 8192] | int4 | 921778545 | PASS | 0 | 1 | 0 | 0 | 0.706707 |
+| custom/dynamic_quant_random_021 | [32, 1, 4096] | int8 | 1016052845 | PASS | 0 | 1 | 0 | 0 | 0.708826 |
+| custom/dynamic_quant_random_022 | [8, 1, 5120] | int4 | 1385093510 | PASS | 0 | 1 | 0 | 0 | 0.703021 |
+| custom/dynamic_quant_random_023 | [8, 1, 4096] | int8 | 884936993 | PASS | 0 | 1 | 0 | 0 | 0.707948 |
+| custom/dynamic_quant_random_024 | [1, 1, 4096] | int4 | 1696159923 | PASS | 0 | 1 | 0 | 0 | 0.706934 |
+| custom/dynamic_quant_random_025 | [64, 1, 5120] | int8 | 1230597722 | PASS | 0 | 1 | 0 | 0 | 0.708502 |
+| custom/dynamic_quant_random_026 | [8, 1, 5120] | int4 | 1082962109 | PASS | 0 | 1 | 0 | 0 | 0.704409 |
+| custom/dynamic_quant_random_027 | [64, 1, 3584] | int8 | 1249361969 | PASS | 0 | 0 | 0 | 0 | 0 |
+| custom/dynamic_quant_random_028 | [64, 1, 8192] | int4 | 2126356694 | PASS | 0 | 1 | 0 | 0 | 0.706836 |
+| custom/dynamic_quant_random_029 | [32, 1, 5120] | int8 | 2030633306 | PASS | 0 | 1 | 0 | 0 | 0.707633 |
+| custom/dynamic_quant_random_030 | [32, 1, 4096] | int4 | 580124394 | PASS | 0 | 1 | 0 | 0 | 0.707242 |
+| custom/dynamic_quant_random_031 | [64, 1, 5120] | int8 | 1163552118 | PASS | 0 | 1 | 0 | 0 | 0.708663 |
+| custom/dynamic_quant_random_032 | [32, 1, 4096] | int4 | 1805025668 | PASS | 0 | 1 | 0 | 0 | 0.706135 |
+| custom/dynamic_quant_random_033 | [32, 1, 8192] | int8 | 360348971 | PASS | 0 | 1 | 0 | 0 | 0.70846 |
+| custom/dynamic_quant_random_034 | [32, 1, 3584] | int4 | 392170129 | PASS | 0 | 1 | 0 | 0 | 0.705749 |
+| custom/dynamic_quant_random_035 | [64, 1, 8192] | int8 | 1902112164 | PASS | 0 | 1 | 0 | 0 | 0.70824 |
+| custom/dynamic_quant_random_036 | [16, 1, 3584] | int4 | 1156290584 | PASS | 0 | 1 | 0 | 0 | 0.695294 |
+| custom/dynamic_quant_random_037 | [16, 1, 4096] | int8 | 454063838 | PASS | 0 | 1 | 0 | 0 | 0.706492 |
+| custom/dynamic_quant_random_038 | [64, 1, 8192] | int4 | 613794047 | PASS | 0 | 1 | 0 | 0 | 0.696795 |
+| custom/dynamic_quant_random_039 | [16, 1, 8192] | int8 | 2000343471 | PASS | 0 | 1 | 0 | 0 | 0.706896 |
+| custom/dynamic_quant_random_040 | [64, 1, 3584] | int4 | 247847709 | PASS | 0 | 1 | 0 | 0 | 0.696522 |

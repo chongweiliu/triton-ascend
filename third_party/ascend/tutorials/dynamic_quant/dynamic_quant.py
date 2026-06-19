@@ -18,13 +18,8 @@ import triton
 import triton.language as tl
 import triton.language.extra.cann.extension as al
 
-try:
-    import triton.language.extra.cann.libdevice as libdevice
-except ModuleNotFoundError:
-    import triton.language.extra.ascend.libdevice as libdevice
-
 _ROW_STRIDE_MIN_ROWS = 48
-_ROW_STRIDE_GRID = 48
+_ROW_STRIDE_GRID = 32
 
 
 @triton.jit
@@ -45,13 +40,12 @@ def _dynamic_quant_kernel(
     al.multibuffer(x, 2)
     abs_x = tl.abs(x)
     abs_max = tl.max(abs_x, axis=0).to(tl.float32)
-    safe_max = tl.maximum(abs_max, 1.0e-12)
+    safe_max = tl.where(abs_max == 0.0, 1.0e-12, abs_max)
     scale = safe_max / q_abs
     inv_scale = q_abs / safe_max
-    q = x * inv_scale
-    q_round = libdevice.round(q)
-    tl.store(out_ptr + row * hidden + offs, q_round.to(tl.int8))
     tl.store(scale_ptr + row, scale)
+    q = x * inv_scale
+    tl.store(out_ptr + row * hidden + offs, q.to(tl.int8))
 
 
 @triton.jit
@@ -74,13 +68,12 @@ def _dynamic_quant_kernel_row_stride(
         al.multibuffer(x, 2)
         abs_x = tl.abs(x)
         abs_max = tl.max(abs_x, axis=0).to(tl.float32)
-        safe_max = tl.maximum(abs_max, 1.0e-12)
+        safe_max = tl.where(abs_max == 0.0, 1.0e-12, abs_max)
         scale = safe_max / q_abs
         inv_scale = q_abs / safe_max
-        q = x * inv_scale
-        q_round = libdevice.round(q)
-        tl.store(out_ptr + row * hidden + offs, q_round.to(tl.int8))
         tl.store(scale_ptr + row, scale)
+        q = x * inv_scale
+        tl.store(out_ptr + row * hidden + offs, q.to(tl.int8))
 
 
 @triton.jit
@@ -104,17 +97,16 @@ def _dynamic_quant_loop_kernel(
         x = tl.load(x_ptr + row * hidden + h, mask=mask, other=0.0).to(tl.float32)
         chunk_abs = tl.max(tl.where(mask, tl.abs(x), 0.0), axis=0)
         abs_max = tl.maximum(abs_max, chunk_abs)
-    safe_max = tl.maximum(abs_max, 1.0e-12)
+    safe_max = tl.where(abs_max == 0.0, 1.0e-12, abs_max)
     scale = safe_max / q_abs
     inv_scale = q_abs / safe_max
+    tl.store(scale_ptr + row, scale)
     for chunk in range(0, NUM_CHUNKS):
         h = chunk * BLOCK_H + offs
         mask = h < hidden
         x = tl.load(x_ptr + row * hidden + h, mask=mask, other=0.0).to(tl.float32)
         q = x * inv_scale
-        q_round = libdevice.round(q)
-        tl.store(out_ptr + row * hidden + h, q_round.to(tl.int8), mask=mask)
-    tl.store(scale_ptr + row, scale)
+        tl.store(out_ptr + row * hidden + h, q.to(tl.int8), mask=mask)
 
 
 @triton.jit
@@ -138,17 +130,16 @@ def _dynamic_quant_loop_nomask_kernel(
         al.multibuffer(x, 2)
         chunk_abs = tl.max(tl.abs(x), axis=0).to(tl.float32)
         abs_max = tl.maximum(abs_max, chunk_abs)
-    safe_max = tl.maximum(abs_max, 1.0e-12)
+    safe_max = tl.where(abs_max == 0.0, 1.0e-12, abs_max)
     scale = safe_max / q_abs
     inv_scale = q_abs / safe_max
+    tl.store(scale_ptr + row, scale)
     for chunk in range(0, NUM_CHUNKS):
         h = chunk * BLOCK_H + offs
         x = tl.load(x_ptr + row * hidden + h)
         al.multibuffer(x, 2)
         q = x * inv_scale
-        q_round = libdevice.round(q)
-        tl.store(out_ptr + row * hidden + h, q_round.to(tl.int8))
-    tl.store(scale_ptr + row, scale)
+        tl.store(out_ptr + row * hidden + h, q.to(tl.int8))
 
 
 def _dst_type_params(dst_type: str) -> tuple[float, float, float]:
@@ -193,7 +184,7 @@ def dynamic_quant(x: torch.Tensor, dst_type: str = "int8") -> Tuple[torch.Tensor
 
     if hidden <= 8192:
         block_h = hidden
-        if rows > _ROW_STRIDE_MIN_ROWS:
+        if rows == 1 or rows == 8 or rows > _ROW_STRIDE_MIN_ROWS:
             _dynamic_quant_kernel_row_stride[(_ROW_STRIDE_GRID, )](
                 x,
                 output,

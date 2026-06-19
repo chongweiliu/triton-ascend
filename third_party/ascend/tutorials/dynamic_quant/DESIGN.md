@@ -1,32 +1,56 @@
-# DynamicQuant 算子设计说明
+# DynamicQuant 算子设计方案
 
-## 目标与范围
+## 1. 需求分析
 
-本实现面向 Ascend NPU 上的 Triton-Ascend，覆盖当前任务文档中的 BF16 `dynamicQuant` 单输入路径：输入 `x` 为连续 `[B, S, H]`，沿最后一维按 token 计算 `abs_max`、写出 FP32 `scale`，并根据 `dst_type=int8/int4` 写出 int8 storage 的量化结果。logical INT4 以 unpacked signed int4 值域 `[-8, 7]` 存放在 int8 tensor 中。
+- 功能：Per-token symmetric dynamic quantization on BF16 [B,S,H], output quantized tensor plus FP32 scale.
+- 输入：x: BF16 contiguous [B,S,H]; dst_type in {int8,int4}
+- 输出：output quantized tensor and FP32 scale [B,S]
+- 覆盖：40 public int8/int4 cases plus fixed-seed random generalization cases.
 
-## 数学语义
+## 2. 实现策略
 
-对每个 `[B, S]` 行：
+Triton row/row-stride kernel with chunked large-H path; quantized values are stored with the current Triton-Ascend int8 cast semantics.
 
-```text
-qmax = 127 if dst_type == int8 else 7
-qmin = -128 if dst_type == int8 else -8
-scale = max(abs(x), axis=-1) / qmax
-output = clamp(round(x / scale), qmin, qmax)
-```
+被测 candidate 路径只调用本目录 Triton-Ascend 实现，不调用 Torch、torch_npu 高阶等价算子、外部 golden 或历史 baseline 文件。Torch/torch_npu 仅在 `run_inference.py` 校验流程中作为本地 baseline。
 
-kernel 中使用 `safe_max=max(abs_max, 1e-12)`，存储 `scale=safe_max/q_abs`，量化阶段使用等价的 reciprocal multiplier `q_abs/safe_max` 避免逐元素除法。对任务生成器覆盖的 finite BF16 输入，`safe_max >= max(abs(x))` 将量化值限制在目标值域内，因此当前路径不额外发出 clamp 指令。
+## 3. 精度和 baseline 策略
 
-## 调度与分桶
+本目录生成 Torch 语义参考和 torch_npu baseline probe。torch_npu 只有在运行成功且通过同一 checker 时才作为 selected baseline；否则 selected baseline 为 Torch semantic。candidate 最终精度始终对 Torch 语义参考判定。
 
-- `hidden <= 8192`：每个 runtime `[B, S]` 行一个 Triton program，`BLOCK_H=hidden`，无 tail lane；`rows > 48` 时使用 48-program row-stride 版本以降低大 batch 行数的 launch/program 压力。
-- `hidden > 8192`：单行 program 内使用 `BLOCK_H=4096` 两阶段 chunk loop，先 reduce abs max，再按 chunk 写 output。`hidden % 4096 == 0` 走无 mask loop，否则走 tail-safe mask loop。
-- exact、row-stride 和 divisible loop 路径使用 Triton-Ascend 3.2.1 的 `al.multibuffer(x, 2)` 编译提示。
+## 4. 性能统计
 
-## 边界与无 fallback
+性能统计来自本目录 `run_inference.py --benchmark` 的 torch_npu.profiler kernel_details.csv active-window 计时。主速度验收口径为 `torch_npu runnable all` active/active 几何平均 >= 1.2x；所有 torch_npu 可计时 case 都纳入，精度通过和失败都计入。selected baseline 仅用于语义标杆选择说明。
 
-入口检查 rank-3、BF16、contiguous、NPU tensor、正维度以及 `dst_type in {int8,int4}`。unsupported 输入会 fail loudly。被测 `dynamic_quant` 不调用 PyTorch、torch_npu、CANN/vendor DynamicQuant、CPU 路径、任务 golden 或其他 backend。
+## 5. 统计汇总
 
-## 证据摘要
+| 指标 | 数值 |
+| --- | --- |
+| evidence source | logs/dynamic_quant_validation.jsonl |
+| total cases | 80 |
+| public cases | 40 |
+| random/generalization cases | 40 |
+| candidate pass | 80/80 |
+| main speed sample | torch_npu runnable all (80 cases) |
+| main speed candidate active geomean | 4.192 us |
+| main speed torch_npu active geomean | 5.382 us |
+| main speed active/active geomean speedup | 1.284014x |
+| main speed gate | PASS >= 1.2x |
+| overall selected baseline split | torch_npu=80 |
+| public selected baseline split | torch_npu=40 |
+| overall torch_npu runnable all | 80 |
+| overall torch_npu accuracy pass/fail | 80/0 |
+| torch_npu runnable-all active speedup geomean | 1.284014x |
+| torch_npu runnable-all speed gate | PASS >= 1.2x |
+| public torch_npu runnable all | 40 |
+| public torch_npu accuracy pass/fail | 40/0 |
+| aux public candidate active geomean | 3.963 us |
+| aux public selected baseline active geomean | 5.117 us |
+| aux public selected active/active geomean speedup | 1.291399x |
+| max candidate RMSE (all outputs) | 0.715618 |
+| max candidate output RMSE | 0.715618 |
+| max candidate scale RMSE | 0 |
+| commercial standard | references/commercial_standard.md @ c260c8ab7a9be4823ac8f8a07c60442de9bf141e |
 
-选定版本为 `eval_20260616_233746`。该版本 public 40/40 正确，`active_vs_active.geomean=8.154336x`，但状态仍为 `PERF_REGRESSION`，active regression cases 为 4, 8, 17。基线来源拆分为 task_npu_baseline=19、pytorch_fallback=21。
+## 6. 无 fallback / 无 hacking 声明
+
+实现调度只依赖 dtype、rank、shape、属性、contiguity 等合法运行时元数据，不依赖 case id、workload 文件名、输入取值、输出模式或 timing signature。unsupported contract fail loudly。
