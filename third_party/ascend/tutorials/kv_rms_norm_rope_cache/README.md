@@ -1,50 +1,50 @@
-# KvRmsNormRopeCache Triton-Ascend
+# KvRmsNormRopeCache Triton-Ascend Tutorial
 
-本目录存放 KvRmsNormRopeCache 算子的 Triton-Ascend 交付材料，代码版本选用当前动态 `Dk/Dv` 实现：公开 `64/64` split 走专用 fast path，其他合法 split 走 generic dynamic path。
+## 说明
 
-## 文件说明
+本目录是自包含交付目录。baseline、精度校验、性能统计和报告生成都由本目录脚本完成；不读取外部历史评测 CSV/JSON，也不保留历史对照文件。
 
-- `kv_rms_norm_rope_cache.py`：Triton-Ascend kernel 及 Python 调用封装。
-- `validate_kv_rms_norm_rope_cache.py`：public 和 fixed-seed random dynamic split 验证脚本。
-- `DESIGN.md`：算子设计说明。
-- `SELF_VALIDATION_REPORT.md`：自验证报告、OpForge public 性能明细和随机泛化明细。
-- `KvRmsNormRopeCache算子设计方案.docx`：设计方案模板填充件。
-- `KvRmsNormRopeCache算子自验证报告.xlsx`：自验证表、逐 case 性能、随机泛化和日志证据。
-- `OPFORGE_EVIDENCE.json`：结构化 OpForge 证据副本。
-- `logs/kv_rms_norm_rope_cache_validation_20260617.*`：20 public + 40 random dynamic split 正确性验证日志。
-- `logs/kv_rms_norm_rope_cache_benchmark_20260617.*`：20 public delivery wall-sync timing sanity 日志。
+## 复现命令
 
-## 运行验证
+前提：当前 Python 环境已安装 torch/torch_npu，并可导入包含 `triton._C` 编译扩展的 Triton-Ascend；`run_inference.py` 会优先使用本仓库的 `python/triton`。
 
 ```bash
-source /mnt/model/lcw/SLAI-Ascend-OpForge/scripts/source_cann9.sh
-export ASCEND_RT_VISIBLE_DEVICES=1
-export ASCEND_VISIBLE_DEVICES=1
-export ASCEND_DEVICE_ID=0
-export NPU_ID=0
-python3 validate_kv_rms_norm_rope_cache.py --public --random-generalization 40 --random-seed 20260617
-python3 validate_kv_rms_norm_rope_cache.py --public --benchmark --warmup 3 --repeat 5
+export NPU_ID=0 && export ASCEND_RT_VISIBLE_DEVICES=$NPU_ID && export ASCEND_VISIBLE_DEVICES=$NPU_ID && source /mnt/model/lcw/.local/Ascend-9.0.0/cann-9.0.0/set_env.sh && python run_inference.py --public --random-generalization 40 --random-seed 20260617 --benchmark --warmup 1 --repeat 3 --jsonl logs/kv_rms_norm_rope_cache_validation.jsonl --summary-json logs/kv_rms_norm_rope_cache_validation.summary.json
+UV_PROJECT_ENVIRONMENT=/tmp/uv-triton-ascend-delivery uv run --no-project --with openpyxl --with python-docx python generate_delivery.py
 ```
 
 ## 当前证据
 
 | 指标 | 数值 |
 | --- | --- |
-| delivery 版本 | 当前动态 `Dk/Dv` 实现 |
-| latest OpForge run id | `eval_20260617_162945` |
-| latest OpForge 状态 | `PASSED` |
-| public 正确性 | `20/20 PASS` |
-| active/active geomean | `77.170667x` |
-| min active speedup | `37.517355x` |
-| candidate active mean | `77.675 us` |
-| baseline source split | `pytorch_fallback=20` |
-| dynamic audit | `40/40 PASS, seed 20260617` |
-| delivery correctness | `60/60 PASS; public 20, random 40` |
-| delivery benchmark sanity | `20/20 PASS; wall-sync geomean 207.255 us` |
-| best historical public run | `eval_20260616_211136`, active geomean `84.559295x` |
+| evidence source | logs/kv_rms_norm_rope_cache_validation.jsonl |
+| total cases | 60 |
+| public cases | 20 |
+| random/generalization cases | 40 |
+| candidate pass | 60/60 |
+| main speed sample | torch_npu runnable all (0 cases) |
+| main speed candidate active geomean | N/A |
+| main speed torch_npu active geomean | N/A |
+| main speed active/active geomean speedup | N/A |
+| main speed gate | N/A (no torch_npu runnable timed case) |
+| overall selected baseline split | torch=60 |
+| public selected baseline split | torch=20 |
+| overall torch_npu runnable all | 0 |
+| overall torch_npu accuracy pass/fail | 0/0 |
+| torch_npu runnable-all active speedup geomean | N/A |
+| torch_npu runnable-all speed gate | N/A (no torch_npu runnable timed case) |
+| public torch_npu runnable all | 0 |
+| public torch_npu accuracy pass/fail | 0/0 |
+| aux public candidate active geomean | 80.561 us |
+| aux public selected baseline active geomean | N/A |
+| aux public selected active/active geomean speedup | N/A |
+| max candidate RMSE | 1.9895e-05 |
+| commercial standard | references/commercial_standard.md @ c260c8ab7a9be4823ac8f8a07c60442de9bf141e |
 
-正式性能主证据使用 OpForge active-window。delivery benchmark 是本目录脚本的 wall-sync sanity，不替代 OpForge 计分。当前 public baseline 在 OpForge 中为 `pytorch_fallback`，因此不能把这些数字表述为对可用 CANN whole-operator 的直接 1.2x 结论。
+## 文件
 
-## 实现边界
-
-实现只按 runtime metadata 分发：dtype、rank、contiguity、shape、`Dk/Dv`、`epsilon`、`cache_mode` 和 backend capacity。被测函数内不调用任务 golden/reference、PyTorch 等价实现、`torch_npu` high-level whole op、CANN/vendor whole op、CPU fallback、peer 或其他后端代码。
+- `kv_rms_norm_rope_cache.py`: Triton-Ascend candidate 实现
+- `run_inference.py`: 统一推理入口
+- `validate_kv_rms_norm_rope_cache.py`: 本地 Torch / torch_npu / candidate baseline 与 checker
+- `generate_delivery.py`: 从本目录 logs 重新生成 README/DESIGN/验收报告/DOCX/XLSX
+- `references/commercial_standard.md`: 商业精度标准本地副本

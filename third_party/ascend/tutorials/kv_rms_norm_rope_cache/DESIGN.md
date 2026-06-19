@@ -1,41 +1,54 @@
-# KvRmsNormRopeCache 算子设计文档
+# KvRmsNormRopeCache 算子设计方案
 
-## 1. 设计目标
+## 1. 需求分析
 
-本实现面向 Ascend NPU 上的 BF16 decode cache update 场景，使用 Triton-Ascend 实现 KvRmsNormRopeCache。核心语义为按 `[Dk, Dv]` 拆分 `kv`，前半做 RoPE，后半做 RMSNorm，并按 `index` 写入 cache。
+- 功能：Decode KV split, RoPE, RMSNorm, and cache update; outputs updated K cache and CKV cache.
+- 输入：kv/gamma/cos/sin/index/cache tensors; BF16 data path with dynamic Dk/Dv validation
+- 输出：updated K cache and CKV cache tensors
+- 覆盖：20 public cases plus fixed-seed random dynamic-split cases.
 
-## 2. 接口定义
+## 2. 实现策略
 
-```python
-kv_rms_norm_rope_cache(kv, gamma, cos, sin, index, kCacheRef, ckvCacheRef, epsilon=1e-5, cache_mode="Norm") -> (kCacheRefOut, ckvCacheRefOut)
-```
+Fast 64/64 split path plus generic dynamic Dk/Dv split path; unsupported metadata fails loudly.
 
-输入均为连续 NPU tensor：`kv/gamma/cos/sin/kCacheRef/ckvCacheRef` 为 BF16，`index` 为 int64。`Dk` 必须为正偶数，`Dv` 必须为正数，`kv[-1] = Dk + Dv`。本实现按公式自洽地使用 `kCacheRef[..., Dk]` 和 `ckvCacheRef[..., Dv]`。
+被测 candidate 路径只调用本目录 Triton-Ascend 实现，不调用 Torch、torch_npu 高阶等价算子、外部 golden 或历史 baseline 文件。Torch/torch_npu 仅在 `run_inference.py` 校验流程中作为本地 baseline。
 
-## 3. 形状覆盖与分发
+## 3. 精度和 baseline 策略
 
-公开验证覆盖文档中的 20 个模型行：`Batch in {1,8,16,32,64}`、`HeadNum in {28,32,40,64}`、`HeadDim=128`，即 public split `Dk=Dv=64`。随机泛化验证在相同文档模型行上变化 `Skv`、`Scache`、`Bcache>=Bkv` 和合法 `Dk/Dv` split。
+本目录生成 Torch 语义参考和 torch_npu baseline probe。torch_npu 只有在运行成功且通过同一 checker 时才作为 selected baseline；否则 selected baseline 为 Torch semantic。candidate 最终精度始终对 Torch 语义参考判定。
 
-- `Dk=Dv=64`：使用 `_update_inplace_64_kernel`，保持公开路径 fast path。
-- 其他合法 split：使用 `_update_inplace_dynamic_split_kernel`，`BLOCK_KH=next_power_of_2(Dk/2)`，`BLOCK_V=next_power_of_2(Dv)`。
-- `max(Dk,Dv)>1024`：backend capacity guard，fail loudly，不 fallback。
+## 4. 性能统计
 
-## 4. Kernel 设计
+性能统计来自本目录 `run_inference.py --benchmark` 的 torch_npu.profiler kernel_details.csv active-window 计时。主速度验收口径为 `torch_npu runnable all` active/active 几何平均 >= 1.2x；所有 torch_npu 可计时 case 都纳入，精度通过和失败都计入。selected baseline 仅用于语义标杆选择说明。
 
-kernel grid 为 `(heads, B)`，每个 program 负责一个 `(head, batch)` pair，并在 program 内按 `Skv` 顺序遍历 token。合法 index 写入 cache；`index=-1` 跳过；duplicate index 按源 token 顺序自然保持 last-write-wins。
+## 5. 统计汇总
 
-RoPE 使用 low/high half 连续 load。动态 split 路径与 64/64 fast path 保持同构数据流，避免 all-lane `rope/rot_d` 泛化表达式重复读取 RoPE 行。RMSNorm value 向量单独处理，以 `Dv` lane 做 FP32 sum、rsqrt 和 `gamma` 乘法。
+| 指标 | 数值 |
+| --- | --- |
+| evidence source | logs/kv_rms_norm_rope_cache_validation.jsonl |
+| total cases | 60 |
+| public cases | 20 |
+| random/generalization cases | 40 |
+| candidate pass | 60/60 |
+| main speed sample | torch_npu runnable all (0 cases) |
+| main speed candidate active geomean | N/A |
+| main speed torch_npu active geomean | N/A |
+| main speed active/active geomean speedup | N/A |
+| main speed gate | N/A (no torch_npu runnable timed case) |
+| overall selected baseline split | torch=60 |
+| public selected baseline split | torch=20 |
+| overall torch_npu runnable all | 0 |
+| overall torch_npu accuracy pass/fail | 0/0 |
+| torch_npu runnable-all active speedup geomean | N/A |
+| torch_npu runnable-all speed gate | N/A (no torch_npu runnable timed case) |
+| public torch_npu runnable all | 0 |
+| public torch_npu accuracy pass/fail | 0/0 |
+| aux public candidate active geomean | 80.561 us |
+| aux public selected baseline active geomean | N/A |
+| aux public selected active/active geomean speedup | N/A |
+| max candidate RMSE | 1.9895e-05 |
+| commercial standard | references/commercial_standard.md @ c260c8ab7a9be4823ac8f8a07c60442de9bf141e |
 
-## 5. 精度与性能证据
+## 6. 无 fallback / 无 hacking 声明
 
-- delivery 正确性验证 `60/60` 通过，其中 public `20` 个，random dynamic split `40` 个。
-- OpForge latest run `eval_20260617_162945`：`20/20` 通过，active/active geomean `77.170667x`，mean latency `77.675 us`。
-- 历史 best run `eval_20260616_211136` active geomean `84.559295x`；本交付选择 latest 动态 split 版本，因为它满足当前更宽的 `Dk+Dv` 支持边界。
-
-## 6. 无 fallback 边界
-
-被测函数只使用本地 Triton-Ascend JIT kernel。Python 封装只做元数据校验和 launch，不在 Python 中计算被测结果，也不调用任务 golden/reference、PyTorch 等价实现、`torch_npu` whole op、CANN/vendor whole op、CPU fallback、peer 或其他后端代码。
-
-## 7. 风险说明
-
-当前OpForge public baseline为 `pytorch_fallback`，不能从该证据扩写为对可用 CANN whole-operator 的直接 1.2x 结论。delivery benchmark 为 wall-sync sanity，正式性能引用 OpForge active-window。
+实现调度只依赖 dtype、rank、shape、属性、contiguity 等合法运行时元数据，不依赖 case id、workload 文件名、输入取值、输出模式或 timing signature。unsupported contract fail loudly。
