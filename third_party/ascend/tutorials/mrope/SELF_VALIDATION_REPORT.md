@@ -1,110 +1,190 @@
-# MRoPE 自验证报告
+# MRoPE 算子自验证报告
 
-## 1. 环境信息
+## 1. 报告说明
 
-| 项目 | 数值 |
-|---|---|
-| 评测器 run id | `eval_20260617_151008` |
-| 后端 | Triton-Ascend |
-| 芯片 | Ascend910_9382 |
-| CANN | 9.0.0 |
-| Driver | 25.5.2 |
-| Python | 3.11.14 |
-| PyTorch | None |
-| torch_npu | 2.10.0 |
-| OpForge timing source | `results/eval_records/eval_20260617_151008/timing_artifacts/main_results.csv` |
-| delivery validation | `logs/mrope_public_random_20260617.jsonl` |
+- 单一数值证据源：`logs/mrope_validation.jsonl`
+- 本报告由当前目录 `generate_delivery.py` 生成，只读取本目录 logs/templates/references。
+- L1 是商业精度等级，不是 L1 norm；本表对齐商业标准中的 MARE/MERE/RMSE 指标口径。
+- 本报告是本目录自验证，不等同于完整商业 L1 认证；完整商业认证还要求标准规定的用例规模和执行轮次。
+- RMSE/MERE/MARE 由本目录 checker 输出。
+- 速度门槛按 `torch_npu runnable all` active/active 几何平均 >= 1.2x；无 torch_npu 可计时 case 标记为 N/A，不用 selected baseline 代替。
+- 截图证据未外置，日志内容嵌入 XLSX `日志证据` 工作表。
+- 不保留、不读取外部历史对照文件。
 
-## 2. 测试范围
+## 2. 性能总体对比
 
-public 集包含 20 个 BF16 case，覆盖 RoPE、3-row MRoPE、4-row MRoPE、half/interleaved、default/interleave cache，以及 `rotary_dim=64/128`。delivery random generalization 包含 40 个固定 seed 非公开元数据组合，`seed=20260617`，policy=`seeded_mrope_metadata_v1`。
+| 指标 | 数值 |
+| --- | --- |
+| evidence source | logs/mrope_validation.jsonl |
+| total cases | 60 |
+| public cases | 20 |
+| random/generalization cases | 40 |
+| candidate pass | 60/60 |
+| main speed sample | torch_npu runnable all (31 cases) |
+| main speed candidate active geomean | 11.271 us |
+| main speed torch_npu active geomean | 13.765 us |
+| main speed active/active geomean speedup | 1.211017x |
+| main speed gate | PASS >= 1.2x |
+| overall selected baseline split | torch=28, torch_npu=32 |
+| public selected baseline split | torch=8, torch_npu=12 |
+| overall torch_npu runnable all | 31 |
+| overall torch_npu accuracy pass/fail | 31/0 |
+| torch_npu runnable-all active speedup geomean | 1.211017x |
+| torch_npu runnable-all speed gate | PASS >= 1.2x |
+| public torch_npu runnable all | 12 |
+| public torch_npu accuracy pass/fail | 12/0 |
+| aux public candidate active geomean | 16.067 us |
+| aux public selected baseline active geomean | 13.369 us |
+| aux public selected active/active geomean speedup | 1.220977x |
+| max candidate RMSE | 0 |
+| commercial standard | references/commercial_standard.md @ c260c8ab7a9be4823ac8f8a07c60442de9bf141e |
 
-## 3. 精度结果
+## 3. 性能口径汇总
 
-| 范围 | Triton 候选 | 总数 | mismatch | max_diff | max_mare |
-|---|---:|---:|---:|---:|---:|
-| public + random | 60 | 60 | 0 | 0.000000e+00 | 0.000000e+00 |
+| Scope | Cases | Candidate active geomean | Baseline active geomean | Active/active geomean speedup | Precision pass | Note |
+| --- | --- | --- | --- | --- | --- | --- |
+| main torch_npu timed sample | 31 | 11.271 us | 13.765 us | 1.211017x | 31/31 | 主速度验收口径；candidate 和 torch_npu 均只在这同一批有 torch_npu active 计时的 case 上取几何平均；gate >= 1.2x |
+| torch_npu accuracy-pass | 31 | 11.271 us | 13.765 us | 1.211017x | 31/31 | 全量 torch_npu 有效计时且本地 checker PASS 子集 |
+| torch_npu accuracy-fail | 0 | N/A | N/A | N/A | 0/0 | 全量 torch_npu 有效计时但本地 checker FAIL 子集 |
+| aux public selected baseline | 20 | 16.067 us | 13.369 us | 1.220977x | 20/20 | 补充语义标杆口径；torch_npu 仅在本地 checker 通过时选中，否则选 Torch |
+| aux public torch semantic baseline | 20 | 16.067 us | N/A | N/A | 20/20 | 补充 Torch 语义参考口径，始终作为精度语义基准 |
 
-## 4. 性能结果
+## 4. Baseline 校验明细
 
-`eval_20260617_151008` 是当前边界修复源码的 latest full-public 记录，状态 `PASSED`，20/20 PASS，主指标 `active_vs_active.geomean=11.657673x`，min `1.146341x`，score `100.018425`。baseline split 为 task_npu_baseline=8、pytorch_fallback=12。
+| Case | Selected implementation | Selection rule | Torch pass | torch_npu runnable | torch_npu pass | torch_npu MERE | torch_npu MARE | torch_npu RMSE | torch_npu max diff | Reason | Seed/attrs |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| custom/mrope_1 | torch_npu | Use torch_npu only when it runs and passes this directory's precision checker; otherwise use Torch semantic baseline. | PASS | YES | PASS | 0 | 0 | 0 | 0 |  | {"seed": 1084307072, "attrs": {"cache_mode": "default", "head_size": 128, "mrope_section": [0, 0, 0], "rotary_mode": "half"}, "dst_type": null, "case_detail": {"Batch": 1, "HeadDim": 128, "HeadNum": 28, "HiddenSize": 3584}} |
+| custom/mrope_2 | torch_npu | Use torch_npu only when it runs and passes this directory's precision checker; otherwise use Torch semantic baseline. | PASS | YES | PASS | 0 | 0 | 0 | 0 |  | {"seed": 1477511722, "attrs": {"cache_mode": "default", "head_size": 128, "mrope_section": [16, 24, 24], "rotary_mode": "half"}, "dst_type": null, "case_detail": {"Batch": 1, "HeadDim": 128, "HeadNum": 32, "HiddenSize": 4096}} |
+| custom/mrope_3 | torch | Use torch_npu only when it runs and passes this directory's precision checker; otherwise use Torch semantic baseline. | PASS | NO | FAIL | 0 | 0 | 0 | 0 | RuntimeError: rotary_mode only support half or interleave [ERROR] 2026-06-19-10:27:36 (PID:3639147, Device:0, RankID:-1) ERR01003 OPS invalid value | {"seed": 597351877, "attrs": {"cache_mode": "default", "head_size": 128, "mrope_section": [24, 20, 20], "rotary_mode": "interleaved"}, "dst_type": null, "case_detail": {"Batch": 1, "HeadDim": 128, "HeadNum": 40, "HiddenSize": 5120}} |
+| custom/mrope_4 | torch_npu | Use torch_npu only when it runs and passes this directory's precision checker; otherwise use Torch semantic baseline. | PASS | YES | PASS | 0 | 0 | 0 | 0 |  | {"seed": 462559110, "attrs": {"cache_mode": "default", "head_size": 128, "mrope_section": [16, 16, 16, 16], "rotary_mode": "half"}, "dst_type": null, "case_detail": {"Batch": 1, "HeadDim": 128, "HeadNum": 64, "HiddenSize": 8192}} |
+| custom/mrope_5 | torch | Use torch_npu only when it runs and passes this directory's precision checker; otherwise use Torch semantic baseline. | PASS | NO | FAIL | 0 | 0 | 0 | 0 | RuntimeError: torch_npu.npu_mrope does not expose cache_mode; cache_mode=interleave is not covered | {"seed": 1479209576, "attrs": {"cache_mode": "interleave", "head_size": 128, "mrope_section": [8, 12, 12], "rotary_mode": "half"}, "dst_type": null, "case_detail": {"Batch": 8, "HeadDim": 128, "HeadNum": 28, "HiddenSize": 3584}} |
+| custom/mrope_6 | torch_npu | Use torch_npu only when it runs and passes this directory's precision checker; otherwise use Torch semantic baseline. | PASS | YES | PASS | 0 | 0 | 0 | 0 |  | {"seed": 2071566058, "attrs": {"cache_mode": "default", "head_size": 128, "mrope_section": [0, 0, 0], "rotary_mode": "half"}, "dst_type": null, "case_detail": {"Batch": 8, "HeadDim": 128, "HeadNum": 32, "HiddenSize": 4096}} |
+| custom/mrope_7 | torch_npu | Use torch_npu only when it runs and passes this directory's precision checker; otherwise use Torch semantic baseline. | PASS | YES | PASS | 0 | 0 | 0 | 0 |  | {"seed": 187621401, "attrs": {"cache_mode": "default", "head_size": 128, "mrope_section": [16, 24, 24], "rotary_mode": "half"}, "dst_type": null, "case_detail": {"Batch": 8, "HeadDim": 128, "HeadNum": 40, "HiddenSize": 5120}} |
+| custom/mrope_8 | torch | Use torch_npu only when it runs and passes this directory's precision checker; otherwise use Torch semantic baseline. | PASS | NO | FAIL | 0 | 0 | 0 | 0 | RuntimeError: rotary_mode only support half or interleave [ERROR] 2026-06-19-10:29:39 (PID:3639147, Device:0, RankID:-1) ERR01003 OPS invalid value | {"seed": 42610454, "attrs": {"cache_mode": "default", "head_size": 128, "mrope_section": [24, 20, 20], "rotary_mode": "interleaved"}, "dst_type": null, "case_detail": {"Batch": 8, "HeadDim": 128, "HeadNum": 64, "HiddenSize": 8192}} |
+| custom/mrope_9 | torch_npu | Use torch_npu only when it runs and passes this directory's precision checker; otherwise use Torch semantic baseline. | PASS | YES | PASS | 0 | 0 | 0 | 0 |  | {"seed": 21837909, "attrs": {"cache_mode": "default", "head_size": 128, "mrope_section": [16, 16, 16, 16], "rotary_mode": "half"}, "dst_type": null, "case_detail": {"Batch": 16, "HeadDim": 128, "HeadNum": 28, "HiddenSize": 3584}} |
+| custom/mrope_10 | torch | Use torch_npu only when it runs and passes this directory's precision checker; otherwise use Torch semantic baseline. | PASS | NO | FAIL | 0 | 0 | 0 | 0 | RuntimeError: torch_npu.npu_mrope does not expose cache_mode; cache_mode=interleave is not covered | {"seed": 1564414684, "attrs": {"cache_mode": "interleave", "head_size": 128, "mrope_section": [8, 12, 12], "rotary_mode": "half"}, "dst_type": null, "case_detail": {"Batch": 16, "HeadDim": 128, "HeadNum": 32, "HiddenSize": 4096}} |
+| custom/mrope_11 | torch_npu | Use torch_npu only when it runs and passes this directory's precision checker; otherwise use Torch semantic baseline. | PASS | YES | PASS | 0 | 0 | 0 | 0 |  | {"seed": 1837934397, "attrs": {"cache_mode": "default", "head_size": 128, "mrope_section": [0, 0, 0], "rotary_mode": "half"}, "dst_type": null, "case_detail": {"Batch": 16, "HeadDim": 128, "HeadNum": 40, "HiddenSize": 5120}} |
+| custom/mrope_12 | torch_npu | Use torch_npu only when it runs and passes this directory's precision checker; otherwise use Torch semantic baseline. | PASS | YES | PASS | 0 | 0 | 0 | 0 |  | {"seed": 1772772694, "attrs": {"cache_mode": "default", "head_size": 128, "mrope_section": [16, 24, 24], "rotary_mode": "half"}, "dst_type": null, "case_detail": {"Batch": 16, "HeadDim": 128, "HeadNum": 64, "HiddenSize": 8192}} |
+| custom/mrope_13 | torch | Use torch_npu only when it runs and passes this directory's precision checker; otherwise use Torch semantic baseline. | PASS | NO | FAIL | 0 | 0 | 0 | 0 | RuntimeError: rotary_mode only support half or interleave [ERROR] 2026-06-19-10:31:37 (PID:3639147, Device:0, RankID:-1) ERR01003 OPS invalid value | {"seed": 5610152, "attrs": {"cache_mode": "default", "head_size": 128, "mrope_section": [24, 20, 20], "rotary_mode": "interleaved"}, "dst_type": null, "case_detail": {"Batch": 32, "HeadDim": 128, "HeadNum": 28, "HiddenSize": 3584}} |
+| custom/mrope_14 | torch_npu | Use torch_npu only when it runs and passes this directory's precision checker; otherwise use Torch semantic baseline. | PASS | YES | PASS | 0 | 0 | 0 | 0 |  | {"seed": 1347296229, "attrs": {"cache_mode": "default", "head_size": 128, "mrope_section": [16, 16, 16, 16], "rotary_mode": "half"}, "dst_type": null, "case_detail": {"Batch": 32, "HeadDim": 128, "HeadNum": 32, "HiddenSize": 4096}} |
+| custom/mrope_15 | torch | Use torch_npu only when it runs and passes this directory's precision checker; otherwise use Torch semantic baseline. | PASS | NO | FAIL | 0 | 0 | 0 | 0 | RuntimeError: torch_npu.npu_mrope does not expose cache_mode; cache_mode=interleave is not covered | {"seed": 177205156, "attrs": {"cache_mode": "interleave", "head_size": 128, "mrope_section": [8, 12, 12], "rotary_mode": "half"}, "dst_type": null, "case_detail": {"Batch": 32, "HeadDim": 128, "HeadNum": 40, "HiddenSize": 5120}} |
+| custom/mrope_16 | torch_npu | Use torch_npu only when it runs and passes this directory's precision checker; otherwise use Torch semantic baseline. | PASS | YES | PASS | 0 | 0 | 0 | 0 |  | {"seed": 333733719, "attrs": {"cache_mode": "default", "head_size": 128, "mrope_section": [0, 0, 0], "rotary_mode": "half"}, "dst_type": null, "case_detail": {"Batch": 32, "HeadDim": 128, "HeadNum": 64, "HiddenSize": 8192}} |
+| custom/mrope_17 | torch_npu | Use torch_npu only when it runs and passes this directory's precision checker; otherwise use Torch semantic baseline. | PASS | YES | PASS | 0 | 0 | 0 | 0 |  | {"seed": 1428411558, "attrs": {"cache_mode": "default", "head_size": 128, "mrope_section": [16, 24, 24], "rotary_mode": "half"}, "dst_type": null, "case_detail": {"Batch": 64, "HeadDim": 128, "HeadNum": 28, "HiddenSize": 3584}} |
+| custom/mrope_18 | torch | Use torch_npu only when it runs and passes this directory's precision checker; otherwise use Torch semantic baseline. | PASS | NO | FAIL | 0 | 0 | 0 | 0 | RuntimeError: rotary_mode only support half or interleave [ERROR] 2026-06-19-10:33:39 (PID:3639147, Device:0, RankID:-1) ERR01003 OPS invalid value | {"seed": 2109847545, "attrs": {"cache_mode": "default", "head_size": 128, "mrope_section": [24, 20, 20], "rotary_mode": "interleaved"}, "dst_type": null, "case_detail": {"Batch": 64, "HeadDim": 128, "HeadNum": 32, "HiddenSize": 4096}} |
+| custom/mrope_19 | torch_npu | Use torch_npu only when it runs and passes this directory's precision checker; otherwise use Torch semantic baseline. | PASS | YES | PASS | 0 | 0 | 0 | 0 |  | {"seed": 795094805, "attrs": {"cache_mode": "default", "head_size": 128, "mrope_section": [16, 16, 16, 16], "rotary_mode": "half"}, "dst_type": null, "case_detail": {"Batch": 64, "HeadDim": 128, "HeadNum": 40, "HiddenSize": 5120}} |
+| custom/mrope_20 | torch | Use torch_npu only when it runs and passes this directory's precision checker; otherwise use Torch semantic baseline. | PASS | NO | FAIL | 0 | 0 | 0 | 0 | RuntimeError: torch_npu.npu_mrope does not expose cache_mode; cache_mode=interleave is not covered | {"seed": 1599279944, "attrs": {"cache_mode": "interleave", "head_size": 128, "mrope_section": [8, 12, 12], "rotary_mode": "half"}, "dst_type": null, "case_detail": {"Batch": 64, "HeadDim": 128, "HeadNum": 64, "HiddenSize": 8192}} |
 
-## 5. Public 逐项明细
+## 5. Public 逐Case速度
 
-| Case | Shape | Baseline | Triton active | Triton kernel | Baseline active | Baseline kernel | active/active | kernel/kernel | Mismatch | MARE | Max diff |
-| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| 1 | positions=[1], query=[1, 3584], cache=[2048, 128] | pytorch_fallback | 4.000 us | 3.980 us | 845.500 us | 94.260 us | 211.375000x | 23.683417x | 0 | 0.000000e+00 | 0.000000e+00 |
-| 2 | positions=[3, 1], query=[1, 4096], cache=[2048, 128] | task_npu_baseline | 8.250 us | 8.260 us | 9.500 us | 9.500 us | 1.151515x | 1.150121x | 0 | 0.000000e+00 | 0.000000e+00 |
-| 3 | positions=[3, 1], query=[1, 5120], cache=[2048, 128] | pytorch_fallback | 7.250 us | 7.300 us | 1052.000 us | 256.070 us | 145.103448x | 35.078082x | 0 | 0.000000e+00 | 0.000000e+00 |
-| 4 | positions=[4, 1], query=[1, 8192], cache=[2048, 128] | task_npu_baseline | 8.250 us | 8.260 us | 14.250 us | 14.360 us | 1.727273x | 1.738499x | 0 | 0.000000e+00 | 0.000000e+00 |
-| 5 | positions=[3, 8], query=[8, 3584], cache=[2048, 64] | pytorch_fallback | 13.000 us | 13.000 us | 1298.250 us | 219.300 us | 99.865385x | 16.869231x | 0 | 0.000000e+00 | 0.000000e+00 |
-| 6 | positions=[8], query=[8, 4096], cache=[2048, 128] | pytorch_fallback | 8.000 us | 7.880 us | 914.000 us | 119.920 us | 114.250000x | 15.218274x | 0 | 0.000000e+00 | 0.000000e+00 |
-| 7 | positions=[3, 8], query=[8, 5120], cache=[2048, 128] | task_npu_baseline | 9.250 us | 9.240 us | 10.750 us | 10.720 us | 1.162162x | 1.160173x | 0 | 0.000000e+00 | 0.000000e+00 |
-| 8 | positions=[3, 8], query=[8, 8192], cache=[2048, 128] | pytorch_fallback | 23.000 us | 22.900 us | 1221.750 us | 368.050 us | 53.119565x | 16.072052x | 0 | 0.000000e+00 | 0.000000e+00 |
-| 9 | positions=[4, 16], query=[16, 3584], cache=[2048, 128] | task_npu_baseline | 10.250 us | 10.300 us | 11.750 us | 11.820 us | 1.146341x | 1.147573x | 0 | 0.000000e+00 | 0.000000e+00 |
-| 10 | positions=[3, 16], query=[16, 4096], cache=[2048, 64] | pytorch_fallback | 18.250 us | 18.320 us | 1210.500 us | 245.360 us | 66.328767x | 13.393013x | 0 | 0.000000e+00 | 0.000000e+00 |
-| 11 | positions=[16], query=[16, 5120], cache=[2048, 128] | pytorch_fallback | 14.750 us | 14.660 us | 912.250 us | 152.640 us | 61.847458x | 10.412005x | 0 | 0.000000e+00 | 0.000000e+00 |
-| 12 | positions=[3, 16], query=[16, 8192], cache=[2048, 128] | task_npu_baseline | 9.750 us | 9.660 us | 16.500 us | 16.440 us | 1.692308x | 1.701863x | 0 | 0.000000e+00 | 0.000000e+00 |
-| 13 | positions=[3, 32], query=[32, 3584], cache=[2048, 128] | pytorch_fallback | 34.250 us | 34.180 us | 1043.500 us | 449.250 us | 30.467153x | 13.143651x | 0 | 0.000000e+00 | 0.000000e+00 |
-| 14 | positions=[4, 32], query=[32, 4096], cache=[2048, 128] | task_npu_baseline | 10.500 us | 10.520 us | 16.500 us | 16.420 us | 1.571429x | 1.560836x | 0 | 0.000000e+00 | 0.000000e+00 |
-| 15 | positions=[3, 32], query=[32, 5120], cache=[2048, 64] | pytorch_fallback | 30.250 us | 30.260 us | 963.000 us | 294.840 us | 31.834711x | 9.743556x | 0 | 0.000000e+00 | 0.000000e+00 |
-| 16 | positions=[32], query=[32, 8192], cache=[2048, 128] | pytorch_fallback | 39.250 us | 39.360 us | 721.500 us | 198.510 us | 18.382166x | 5.043445x | 0 | 0.000000e+00 | 0.000000e+00 |
-| 17 | positions=[3, 64], query=[64, 3584], cache=[2048, 128] | task_npu_baseline | 19.000 us | 19.080 us | 22.250 us | 22.340 us | 1.171053x | 1.170860x | 0 | 0.000000e+00 | 0.000000e+00 |
-| 18 | positions=[3, 64], query=[64, 4096], cache=[2048, 128] | pytorch_fallback | 70.250 us | 70.240 us | 1030.250 us | 597.910 us | 14.665480x | 8.512386x | 0 | 0.000000e+00 | 0.000000e+00 |
-| 19 | positions=[4, 64], query=[64, 5120], cache=[2048, 128] | task_npu_baseline | 20.000 us | 19.920 us | 24.000 us | 23.900 us | 1.200000x | 1.199799x | 0 | 0.000000e+00 | 0.000000e+00 |
-| 20 | positions=[3, 64], query=[64, 8192], cache=[2048, 64] | pytorch_fallback | 90.500 us | 90.380 us | 985.000 us | 326.690 us | 10.883978x | 3.614627x | 0 | 0.000000e+00 | 0.000000e+00 |
+| Case | Kind | Shape | DType | Selected baseline | Triton active | Torch active | torch_npu active | Selected active speedup | Torch active speedup | torch_npu active speedup | Triton precision | Torch precision | torch_npu precision | MERE | MARE | RMSE | Max diff | torch_npu error/note |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| custom/mrope_1 | public | [[1], [1, 3584], [1, 3584], [2048, 128]] | bfloat16 | torch_npu | 3.750 us | N/A | 7.500 us | 2.000000x | N/A | 2.000000x | PASS | PASS | PASS | 0 | 0 | 0 | 0 |  |
+| custom/mrope_2 | public | [[3, 1], [1, 4096], [1, 4096], [2048, 128]] | bfloat16 | torch_npu | 7.750 us | N/A | 9.000 us | 1.161290x | N/A | 1.161290x | PASS | PASS | PASS | 0 | 0 | 0 | 0 |  |
+| custom/mrope_3 | public | [[3, 1], [1, 5120], [1, 5120], [2048, 128]] | bfloat16 | torch | 8.500 us | N/A | N/A | N/A | N/A | N/A | PASS | PASS | FAIL | 0 | 0 | 0 | 0 | RuntimeError: rotary_mode only support half or interleave [ERROR] 2026-06-19-10:27:36 (PID:3639147, Device:0, RankID:-1) ERR01003 OPS invalid value |
+| custom/mrope_4 | public | [[4, 1], [1, 8192], [1, 8192], [2048, 128]] | bfloat16 | torch_npu | 8.000 us | N/A | 14.750 us | 1.843750x | N/A | 1.843750x | PASS | PASS | PASS | 0 | 0 | 0 | 0 |  |
+| custom/mrope_5 | public | [[3, 8], [8, 3584], [8, 3584], [2048, 64]] | bfloat16 | torch | 14.000 us | N/A | N/A | N/A | N/A | N/A | PASS | PASS | FAIL | 0 | 0 | 0 | 0 | RuntimeError: torch_npu.npu_mrope does not expose cache_mode; cache_mode=interleave is not covered |
+| custom/mrope_6 | public | [[8], [8, 4096], [8, 4096], [2048, 128]] | bfloat16 | torch_npu | 6.750 us | N/A | 10.000 us | 1.481481x | N/A | 1.481481x | PASS | PASS | PASS | 0 | 0 | 0 | 0 |  |
+| custom/mrope_7 | public | [[3, 8], [8, 5120], [8, 5120], [2048, 128]] | bfloat16 | torch_npu | 9.500 us | N/A | 12.000 us | 1.263158x | N/A | 1.263158x | PASS | PASS | PASS | 0 | 0 | 0 | 0 |  |
+| custom/mrope_8 | public | [[3, 8], [8, 8192], [8, 8192], [2048, 128]] | bfloat16 | torch | 24.750 us | N/A | N/A | N/A | N/A | N/A | PASS | PASS | FAIL | 0 | 0 | 0 | 0 | RuntimeError: rotary_mode only support half or interleave [ERROR] 2026-06-19-10:29:39 (PID:3639147, Device:0, RankID:-1) ERR01003 OPS invalid value |
+| custom/mrope_9 | public | [[4, 16], [16, 3584], [16, 3584], [2048, 128]] | bfloat16 | torch_npu | 9.750 us | N/A | 12.000 us | 1.230769x | N/A | 1.230769x | PASS | PASS | PASS | 0 | 0 | 0 | 0 |  |
+| custom/mrope_10 | public | [[3, 16], [16, 4096], [16, 4096], [2048, 64]] | bfloat16 | torch | 19.750 us | N/A | N/A | N/A | N/A | N/A | PASS | PASS | FAIL | 0 | 0 | 0 | 0 | RuntimeError: torch_npu.npu_mrope does not expose cache_mode; cache_mode=interleave is not covered |
+| custom/mrope_11 | public | [[16], [16, 5120], [16, 5120], [2048, 128]] | bfloat16 | torch_npu | 13.000 us | N/A | 11.250 us | 0.865385x | N/A | 0.865385x | PASS | PASS | PASS | 0 | 0 | 0 | 0 |  |
+| custom/mrope_12 | public | [[3, 16], [16, 8192], [16, 8192], [2048, 128]] | bfloat16 | torch_npu | 10.250 us | N/A | 16.250 us | 1.585366x | N/A | 1.585366x | PASS | PASS | PASS | 0 | 0 | 0 | 0 |  |
+| custom/mrope_13 | public | [[3, 32], [32, 3584], [32, 3584], [2048, 128]] | bfloat16 | torch | 35.250 us | N/A | N/A | N/A | N/A | N/A | PASS | PASS | FAIL | 0 | 0 | 0 | 0 | RuntimeError: rotary_mode only support half or interleave [ERROR] 2026-06-19-10:31:37 (PID:3639147, Device:0, RankID:-1) ERR01003 OPS invalid value |
+| custom/mrope_14 | public | [[4, 32], [32, 4096], [32, 4096], [2048, 128]] | bfloat16 | torch_npu | 10.750 us | N/A | 16.250 us | 1.511628x | N/A | 1.511628x | PASS | PASS | PASS | 0 | 0 | 0 | 0 |  |
+| custom/mrope_15 | public | [[3, 32], [32, 5120], [32, 5120], [2048, 64]] | bfloat16 | torch | 32.000 us | N/A | N/A | N/A | N/A | N/A | PASS | PASS | FAIL | 0 | 0 | 0 | 0 | RuntimeError: torch_npu.npu_mrope does not expose cache_mode; cache_mode=interleave is not covered |
+| custom/mrope_16 | public | [[32], [32, 8192], [32, 8192], [2048, 128]] | bfloat16 | torch_npu | 38.000 us | N/A | 17.250 us | 0.453947x | N/A | 0.453947x | PASS | PASS | PASS | 0 | 0 | 0 | 0 |  |
+| custom/mrope_17 | public | [[3, 64], [64, 3584], [64, 3584], [2048, 128]] | bfloat16 | torch_npu | 19.000 us | N/A | 19.500 us | 1.026316x | N/A | 1.026316x | PASS | PASS | PASS | 0 | 0 | 0 | 0 |  |
+| custom/mrope_18 | public | [[3, 64], [64, 4096], [64, 4096], [2048, 128]] | bfloat16 | torch | 74.500 us | N/A | N/A | N/A | N/A | N/A | PASS | PASS | FAIL | 0 | 0 | 0 | 0 | RuntimeError: rotary_mode only support half or interleave [ERROR] 2026-06-19-10:33:39 (PID:3639147, Device:0, RankID:-1) ERR01003 OPS invalid value |
+| custom/mrope_19 | public | [[4, 64], [64, 5120], [64, 5120], [2048, 128]] | bfloat16 | torch_npu | 19.750 us | N/A | 22.750 us | 1.151899x | N/A | 1.151899x | PASS | PASS | PASS | 0 | 0 | 0 | 0 |  |
+| custom/mrope_20 | public | [[3, 64], [64, 8192], [64, 8192], [2048, 64]] | bfloat16 | torch | 90.500 us | N/A | N/A | N/A | N/A | N/A | PASS | PASS | FAIL | 0 | 0 | 0 | 0 | RuntimeError: torch_npu.npu_mrope does not expose cache_mode; cache_mode=interleave is not covered |
 
-## 6. 随机泛化明细
+## 6. 商业L1精度对比
 
-| # | Shape | Category | Rotary | Cache | Triton acc | Mismatch | MARE | Max diff |
-| --- | --- | --- | --- | --- | --- | ---: | ---: | ---: |
-| 1 | positions=[5], query=[5, 8192], cache=[256, 128] | rope_half_default | half | default | PASS | 0 | 0.000000e+00 | 0.000000e+00 |
-| 2 | positions=[4, 5], query=[5, 8192], cache=[256, 128] | mrope4_half_default | half | default | PASS | 0 | 0.000000e+00 | 0.000000e+00 |
-| 3 | positions=[3, 3], query=[3, 2048], cache=[256, 128] | mrope3_interleaved_default | interleaved | default | PASS | 0 | 0.000000e+00 | 0.000000e+00 |
-| 4 | positions=[3, 64], query=[64, 1024], cache=[256, 128] | mrope3_interleaved_default | interleaved | default | PASS | 0 | 0.000000e+00 | 0.000000e+00 |
-| 5 | positions=[3, 2], query=[2, 5120], cache=[256, 128] | mrope3_interleaved_default | interleaved | default | PASS | 0 | 0.000000e+00 | 0.000000e+00 |
-| 6 | positions=[4, 3], query=[3, 8192], cache=[1024, 128] | mrope4_half_default | half | default | PASS | 0 | 0.000000e+00 | 0.000000e+00 |
-| 7 | positions=[3, 1], query=[1, 1024], cache=[512, 64] | mrope3_half_interleave64 | half | interleave | PASS | 0 | 0.000000e+00 | 0.000000e+00 |
-| 8 | positions=[3, 64], query=[64, 512], cache=[512, 128] | mrope3_interleaved_default | interleaved | default | PASS | 0 | 0.000000e+00 | 0.000000e+00 |
-| 9 | positions=[4, 3], query=[3, 1024], cache=[2048, 128] | mrope4_half_default | half | default | PASS | 0 | 0.000000e+00 | 0.000000e+00 |
-| 10 | positions=[4, 7], query=[7, 8192], cache=[2048, 128] | mrope4_half_default | half | default | PASS | 0 | 0.000000e+00 | 0.000000e+00 |
-| 11 | positions=[3, 17], query=[17, 512], cache=[2048, 128] | mrope3_half_default | half | default | PASS | 0 | 0.000000e+00 | 0.000000e+00 |
-| 12 | positions=[3, 17], query=[17, 1024], cache=[256, 128] | mrope3_half_default | half | default | PASS | 0 | 0.000000e+00 | 0.000000e+00 |
-| 13 | positions=[3, 7], query=[7, 512], cache=[1024, 128] | mrope3_half_default | half | default | PASS | 0 | 0.000000e+00 | 0.000000e+00 |
-| 14 | positions=[3, 2], query=[2, 512], cache=[1024, 128] | mrope3_half_default | half | default | PASS | 0 | 0.000000e+00 | 0.000000e+00 |
-| 15 | positions=[3, 1], query=[1, 4096], cache=[2048, 64] | mrope3_half_interleave64 | half | interleave | PASS | 0 | 0.000000e+00 | 0.000000e+00 |
-| 16 | positions=[3, 1], query=[1, 512], cache=[2048, 64] | mrope3_half_interleave64 | half | interleave | PASS | 0 | 0.000000e+00 | 0.000000e+00 |
-| 17 | positions=[4, 8], query=[8, 4096], cache=[1024, 128] | mrope4_half_default | half | default | PASS | 0 | 0.000000e+00 | 0.000000e+00 |
-| 18 | positions=[33], query=[33, 2048], cache=[2048, 128] | rope_half_default | half | default | PASS | 0 | 0.000000e+00 | 0.000000e+00 |
-| 19 | positions=[3, 3], query=[3, 3584], cache=[1024, 64] | mrope3_half_interleave64 | half | interleave | PASS | 0 | 0.000000e+00 | 0.000000e+00 |
-| 20 | positions=[3, 64], query=[64, 512], cache=[1024, 128] | mrope3_interleaved_default | interleaved | default | PASS | 0 | 0.000000e+00 | 0.000000e+00 |
-| 21 | positions=[3, 64], query=[64, 2048], cache=[512, 64] | mrope3_half_interleave64 | half | interleave | PASS | 0 | 0.000000e+00 | 0.000000e+00 |
-| 22 | positions=[3, 64], query=[64, 1024], cache=[2048, 64] | mrope3_half_interleave64 | half | interleave | PASS | 0 | 0.000000e+00 | 0.000000e+00 |
-| 23 | positions=[3, 2], query=[2, 1024], cache=[512, 128] | mrope3_interleaved_default | interleaved | default | PASS | 0 | 0.000000e+00 | 0.000000e+00 |
-| 24 | positions=[3, 31], query=[31, 4096], cache=[2048, 64] | mrope3_half_interleave64 | half | interleave | PASS | 0 | 0.000000e+00 | 0.000000e+00 |
-| 25 | positions=[31], query=[31, 2048], cache=[512, 128] | rope_half_default | half | default | PASS | 0 | 0.000000e+00 | 0.000000e+00 |
-| 26 | positions=[33], query=[33, 512], cache=[512, 128] | rope_half_default | half | default | PASS | 0 | 0.000000e+00 | 0.000000e+00 |
-| 27 | positions=[3, 7], query=[7, 2048], cache=[512, 128] | mrope3_half_default | half | default | PASS | 0 | 0.000000e+00 | 0.000000e+00 |
-| 28 | positions=[8], query=[8, 512], cache=[1024, 128] | rope_half_default | half | default | PASS | 0 | 0.000000e+00 | 0.000000e+00 |
-| 29 | positions=[3, 64], query=[64, 1024], cache=[512, 128] | mrope3_interleaved_default | interleaved | default | PASS | 0 | 0.000000e+00 | 0.000000e+00 |
-| 30 | positions=[31], query=[31, 3584], cache=[1024, 128] | rope_half_default | half | default | PASS | 0 | 0.000000e+00 | 0.000000e+00 |
-| 31 | positions=[64], query=[64, 4096], cache=[2048, 128] | rope_half_default | half | default | PASS | 0 | 0.000000e+00 | 0.000000e+00 |
-| 32 | positions=[3, 3], query=[3, 5120], cache=[512, 64] | mrope3_half_interleave64 | half | interleave | PASS | 0 | 0.000000e+00 | 0.000000e+00 |
-| 33 | positions=[3, 31], query=[31, 8192], cache=[1024, 128] | mrope3_interleaved_default | interleaved | default | PASS | 0 | 0.000000e+00 | 0.000000e+00 |
-| 34 | positions=[3, 7], query=[7, 512], cache=[1024, 64] | mrope3_half_interleave64 | half | interleave | PASS | 0 | 0.000000e+00 | 0.000000e+00 |
-| 35 | positions=[4, 3], query=[3, 5120], cache=[512, 128] | mrope4_half_default | half | default | PASS | 0 | 0.000000e+00 | 0.000000e+00 |
-| 36 | positions=[3, 31], query=[31, 3584], cache=[1024, 128] | mrope3_half_default | half | default | PASS | 0 | 0.000000e+00 | 0.000000e+00 |
-| 37 | positions=[3, 5], query=[5, 512], cache=[256, 128] | mrope3_interleaved_default | interleaved | default | PASS | 0 | 0.000000e+00 | 0.000000e+00 |
-| 38 | positions=[3, 1], query=[1, 5120], cache=[1024, 128] | mrope3_interleaved_default | interleaved | default | PASS | 0 | 0.000000e+00 | 0.000000e+00 |
-| 39 | positions=[17], query=[17, 2048], cache=[512, 128] | rope_half_default | half | default | PASS | 0 | 0.000000e+00 | 0.000000e+00 |
-| 40 | positions=[4, 64], query=[64, 2048], cache=[2048, 128] | mrope4_half_default | half | default | PASS | 0 | 0.000000e+00 | 0.000000e+00 |
+| Case | Output | DType | Shape | Reference | Criterion | Candidate AE | Candidate MARE | Candidate MERE | Candidate RMSE | Baseline AE | Baseline MARE | Baseline MERE | Baseline RMSE | L1 metric status | Checker status | Note |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| custom/mrope_1 | query_out | torch.bfloat16 | [1, 3584] | Torch semantic reference generated by this directory | BF16 mixed absolute/relative threshold, base=0.02 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch_npu; RMSE由本目录 checker 输出 |
+| custom/mrope_1 | key_out | torch.bfloat16 | [1, 3584] | Torch semantic reference generated by this directory | BF16 mixed absolute/relative threshold, base=0.02 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch_npu; RMSE由本目录 checker 输出 |
+| custom/mrope_2 | query_out | torch.bfloat16 | [1, 4096] | Torch semantic reference generated by this directory | BF16 mixed absolute/relative threshold, base=0.02 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch_npu; RMSE由本目录 checker 输出 |
+| custom/mrope_2 | key_out | torch.bfloat16 | [1, 4096] | Torch semantic reference generated by this directory | BF16 mixed absolute/relative threshold, base=0.02 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch_npu; RMSE由本目录 checker 输出 |
+| custom/mrope_3 | query_out | torch.bfloat16 | [1, 5120] | Torch semantic reference generated by this directory | BF16 mixed absolute/relative threshold, base=0.02 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch; RMSE由本目录 checker 输出 |
+| custom/mrope_3 | key_out | torch.bfloat16 | [1, 5120] | Torch semantic reference generated by this directory | BF16 mixed absolute/relative threshold, base=0.02 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch; RMSE由本目录 checker 输出 |
+| custom/mrope_4 | query_out | torch.bfloat16 | [1, 8192] | Torch semantic reference generated by this directory | BF16 mixed absolute/relative threshold, base=0.02 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch_npu; RMSE由本目录 checker 输出 |
+| custom/mrope_4 | key_out | torch.bfloat16 | [1, 8192] | Torch semantic reference generated by this directory | BF16 mixed absolute/relative threshold, base=0.02 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch_npu; RMSE由本目录 checker 输出 |
+| custom/mrope_5 | query_out | torch.bfloat16 | [8, 3584] | Torch semantic reference generated by this directory | BF16 mixed absolute/relative threshold, base=0.02 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch; RMSE由本目录 checker 输出 |
+| custom/mrope_5 | key_out | torch.bfloat16 | [8, 3584] | Torch semantic reference generated by this directory | BF16 mixed absolute/relative threshold, base=0.02 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch; RMSE由本目录 checker 输出 |
+| custom/mrope_6 | query_out | torch.bfloat16 | [8, 4096] | Torch semantic reference generated by this directory | BF16 mixed absolute/relative threshold, base=0.02 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch_npu; RMSE由本目录 checker 输出 |
+| custom/mrope_6 | key_out | torch.bfloat16 | [8, 4096] | Torch semantic reference generated by this directory | BF16 mixed absolute/relative threshold, base=0.02 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch_npu; RMSE由本目录 checker 输出 |
+| custom/mrope_7 | query_out | torch.bfloat16 | [8, 5120] | Torch semantic reference generated by this directory | BF16 mixed absolute/relative threshold, base=0.02 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch_npu; RMSE由本目录 checker 输出 |
+| custom/mrope_7 | key_out | torch.bfloat16 | [8, 5120] | Torch semantic reference generated by this directory | BF16 mixed absolute/relative threshold, base=0.02 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch_npu; RMSE由本目录 checker 输出 |
+| custom/mrope_8 | query_out | torch.bfloat16 | [8, 8192] | Torch semantic reference generated by this directory | BF16 mixed absolute/relative threshold, base=0.02 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch; RMSE由本目录 checker 输出 |
+| custom/mrope_8 | key_out | torch.bfloat16 | [8, 8192] | Torch semantic reference generated by this directory | BF16 mixed absolute/relative threshold, base=0.02 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch; RMSE由本目录 checker 输出 |
+| custom/mrope_9 | query_out | torch.bfloat16 | [16, 3584] | Torch semantic reference generated by this directory | BF16 mixed absolute/relative threshold, base=0.02 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch_npu; RMSE由本目录 checker 输出 |
+| custom/mrope_9 | key_out | torch.bfloat16 | [16, 3584] | Torch semantic reference generated by this directory | BF16 mixed absolute/relative threshold, base=0.02 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch_npu; RMSE由本目录 checker 输出 |
+| custom/mrope_10 | query_out | torch.bfloat16 | [16, 4096] | Torch semantic reference generated by this directory | BF16 mixed absolute/relative threshold, base=0.02 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch; RMSE由本目录 checker 输出 |
+| custom/mrope_10 | key_out | torch.bfloat16 | [16, 4096] | Torch semantic reference generated by this directory | BF16 mixed absolute/relative threshold, base=0.02 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch; RMSE由本目录 checker 输出 |
+| custom/mrope_11 | query_out | torch.bfloat16 | [16, 5120] | Torch semantic reference generated by this directory | BF16 mixed absolute/relative threshold, base=0.02 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch_npu; RMSE由本目录 checker 输出 |
+| custom/mrope_11 | key_out | torch.bfloat16 | [16, 5120] | Torch semantic reference generated by this directory | BF16 mixed absolute/relative threshold, base=0.02 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch_npu; RMSE由本目录 checker 输出 |
+| custom/mrope_12 | query_out | torch.bfloat16 | [16, 8192] | Torch semantic reference generated by this directory | BF16 mixed absolute/relative threshold, base=0.02 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch_npu; RMSE由本目录 checker 输出 |
+| custom/mrope_12 | key_out | torch.bfloat16 | [16, 8192] | Torch semantic reference generated by this directory | BF16 mixed absolute/relative threshold, base=0.02 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch_npu; RMSE由本目录 checker 输出 |
+| custom/mrope_13 | query_out | torch.bfloat16 | [32, 3584] | Torch semantic reference generated by this directory | BF16 mixed absolute/relative threshold, base=0.02 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch; RMSE由本目录 checker 输出 |
+| custom/mrope_13 | key_out | torch.bfloat16 | [32, 3584] | Torch semantic reference generated by this directory | BF16 mixed absolute/relative threshold, base=0.02 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch; RMSE由本目录 checker 输出 |
+| custom/mrope_14 | query_out | torch.bfloat16 | [32, 4096] | Torch semantic reference generated by this directory | BF16 mixed absolute/relative threshold, base=0.02 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch_npu; RMSE由本目录 checker 输出 |
+| custom/mrope_14 | key_out | torch.bfloat16 | [32, 4096] | Torch semantic reference generated by this directory | BF16 mixed absolute/relative threshold, base=0.02 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch_npu; RMSE由本目录 checker 输出 |
+| custom/mrope_15 | query_out | torch.bfloat16 | [32, 5120] | Torch semantic reference generated by this directory | BF16 mixed absolute/relative threshold, base=0.02 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch; RMSE由本目录 checker 输出 |
+| custom/mrope_15 | key_out | torch.bfloat16 | [32, 5120] | Torch semantic reference generated by this directory | BF16 mixed absolute/relative threshold, base=0.02 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch; RMSE由本目录 checker 输出 |
+| custom/mrope_16 | query_out | torch.bfloat16 | [32, 8192] | Torch semantic reference generated by this directory | BF16 mixed absolute/relative threshold, base=0.02 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch_npu; RMSE由本目录 checker 输出 |
+| custom/mrope_16 | key_out | torch.bfloat16 | [32, 8192] | Torch semantic reference generated by this directory | BF16 mixed absolute/relative threshold, base=0.02 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch_npu; RMSE由本目录 checker 输出 |
+| custom/mrope_17 | query_out | torch.bfloat16 | [64, 3584] | Torch semantic reference generated by this directory | BF16 mixed absolute/relative threshold, base=0.02 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch_npu; RMSE由本目录 checker 输出 |
+| custom/mrope_17 | key_out | torch.bfloat16 | [64, 3584] | Torch semantic reference generated by this directory | BF16 mixed absolute/relative threshold, base=0.02 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch_npu; RMSE由本目录 checker 输出 |
+| custom/mrope_18 | query_out | torch.bfloat16 | [64, 4096] | Torch semantic reference generated by this directory | BF16 mixed absolute/relative threshold, base=0.02 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch; RMSE由本目录 checker 输出 |
+| custom/mrope_18 | key_out | torch.bfloat16 | [64, 4096] | Torch semantic reference generated by this directory | BF16 mixed absolute/relative threshold, base=0.02 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch; RMSE由本目录 checker 输出 |
+| custom/mrope_19 | query_out | torch.bfloat16 | [64, 5120] | Torch semantic reference generated by this directory | BF16 mixed absolute/relative threshold, base=0.02 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch_npu; RMSE由本目录 checker 输出 |
+| custom/mrope_19 | key_out | torch.bfloat16 | [64, 5120] | Torch semantic reference generated by this directory | BF16 mixed absolute/relative threshold, base=0.02 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch_npu; RMSE由本目录 checker 输出 |
+| custom/mrope_20 | query_out | torch.bfloat16 | [64, 8192] | Torch semantic reference generated by this directory | BF16 mixed absolute/relative threshold, base=0.02 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch; RMSE由本目录 checker 输出 |
+| custom/mrope_20 | key_out | torch.bfloat16 | [64, 8192] | Torch semantic reference generated by this directory | BF16 mixed absolute/relative threshold, base=0.02 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | PASS | PASS | baseline=torch; RMSE由本目录 checker 输出 |
 
-## 7. 无 fallback 检查
+## 7. 随机泛化明细
 
-交付实现的被测路径使用 `@triton.jit` kernel。Python 侧只进行元数据校验、输出分配和 launch 参数组织，不调用 PyTorch 等价实现、`torch_npu.npu_mrope`、CANN/vendor MRoPE、CPU fallback、任务 golden 路径或 peer 解法。验证脚本中的 reference 只用于自验证比较，不在被测路径中调用。
-
-## 8. 复现命令
-
-```bash
-python3 validate_mrope.py --public --random-generalization 40 --random-seed 20260617   --jsonl logs/mrope_public_random_20260617.jsonl   --summary-json logs/mrope_public_random_20260617.summary.json
-```
+| Case | Shape | Category/dst | Seed | Status | Mismatch | Max diff | MERE | MARE | RMSE |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| custom/mrope_random_001 | [[8], [8, 5120], [8, 5120], [256, 128]] | rope_half_default | 357155024 | PASS | 0 | 0 | 0 | 0 | 0 |
+| custom/mrope_random_002 | [[4, 8], [8, 5120], [8, 5120], [256, 128]] | mrope4_half_default | 317870542 | PASS | 0 | 0 | 0 | 0 | 0 |
+| custom/mrope_random_003 | [[3, 8], [8, 3584], [8, 3584], [1024, 128]] | mrope3_interleaved_default | 262279943 | PASS | 0 | 0 | 0 | 0 | 0 |
+| custom/mrope_random_004 | [[3, 64], [64, 5120], [64, 5120], [512, 128]] | mrope3_interleaved_default | 1991089026 | PASS | 0 | 0 | 0 | 0 | 0 |
+| custom/mrope_random_005 | [[3, 64], [64, 8192], [64, 8192], [256, 64]] | mrope3_half_interleave64 | 1376064627 | PASS | 0 | 0 | 0 | 0 | 0 |
+| custom/mrope_random_006 | [[3, 1], [1, 5120], [1, 5120], [256, 128]] | mrope3_interleaved_default | 784605869 | PASS | 0 | 0 | 0 | 0 | 0 |
+| custom/mrope_random_007 | [[4, 8], [8, 3584], [8, 3584], [1024, 128]] | mrope4_half_default | 189440073 | PASS | 0 | 0 | 0 | 0 | 0 |
+| custom/mrope_random_008 | [[3, 1], [1, 3584], [1, 3584], [512, 64]] | mrope3_half_interleave64 | 948197677 | PASS | 0 | 0 | 0 | 0 | 0 |
+| custom/mrope_random_009 | [[3, 64], [64, 8192], [64, 8192], [256, 128]] | mrope3_interleaved_default | 1588184522 | PASS | 0 | 0 | 0 | 0 | 0 |
+| custom/mrope_random_010 | [[3, 8], [8, 4096], [8, 4096], [256, 64]] | mrope3_half_interleave64 | 1892553638 | PASS | 0 | 0 | 0 | 0 | 0 |
+| custom/mrope_random_011 | [[3, 32], [32, 8192], [32, 8192], [1024, 64]] | mrope3_half_interleave64 | 1825869526 | PASS | 0 | 0 | 0 | 0 | 0 |
+| custom/mrope_random_012 | [[4, 8], [8, 3584], [8, 3584], [2048, 128]] | mrope4_half_default | 347532505 | PASS | 0 | 0 | 0 | 0 | 0 |
+| custom/mrope_random_013 | [[4, 64], [64, 4096], [64, 4096], [512, 128]] | mrope4_half_default | 1700093221 | PASS | 0 | 0 | 0 | 0 | 0 |
+| custom/mrope_random_014 | [[3, 1], [1, 3584], [1, 3584], [512, 128]] | mrope3_half_default | 1537592907 | PASS | 0 | 0 | 0 | 0 | 0 |
+| custom/mrope_random_015 | [[16], [16, 8192], [16, 8192], [1024, 128]] | rope_half_default | 1948272746 | PASS | 0 | 0 | 0 | 0 | 0 |
+| custom/mrope_random_016 | [[1], [1, 8192], [1, 8192], [1024, 128]] | rope_half_default | 749951944 | PASS | 0 | 0 | 0 | 0 | 0 |
+| custom/mrope_random_017 | [[3, 1], [1, 4096], [1, 4096], [2048, 64]] | mrope3_half_interleave64 | 1314172540 | PASS | 0 | 0 | 0 | 0 | 0 |
+| custom/mrope_random_018 | [[3, 1], [1, 4096], [1, 4096], [256, 64]] | mrope3_half_interleave64 | 2088918334 | PASS | 0 | 0 | 0 | 0 | 0 |
+| custom/mrope_random_019 | [[3, 32], [32, 8192], [32, 8192], [256, 64]] | mrope3_half_interleave64 | 1662217404 | PASS | 0 | 0 | 0 | 0 | 0 |
+| custom/mrope_random_020 | [[3, 64], [64, 3584], [64, 3584], [1024, 128]] | mrope3_interleaved_default | 1237494549 | PASS | 0 | 0 | 0 | 0 | 0 |
+| custom/mrope_random_021 | [[64], [64, 4096], [64, 4096], [1024, 128]] | rope_half_default | 1117345193 | PASS | 0 | 0 | 0 | 0 | 0 |
+| custom/mrope_random_022 | [[4, 16], [16, 8192], [16, 8192], [512, 128]] | mrope4_half_default | 1405715249 | PASS | 0 | 0 | 0 | 0 | 0 |
+| custom/mrope_random_023 | [[3, 64], [64, 5120], [64, 5120], [256, 128]] | mrope3_interleaved_default | 506179563 | PASS | 0 | 0 | 0 | 0 | 0 |
+| custom/mrope_random_024 | [[3, 64], [64, 4096], [64, 4096], [1024, 128]] | mrope3_half_default | 1122512817 | PASS | 0 | 0 | 0 | 0 | 0 |
+| custom/mrope_random_025 | [[3, 1], [1, 8192], [1, 8192], [512, 128]] | mrope3_half_default | 630834576 | PASS | 0 | 0 | 0 | 0 | 0 |
+| custom/mrope_random_026 | [[3, 16], [16, 4096], [16, 4096], [256, 64]] | mrope3_half_interleave64 | 882373969 | PASS | 0 | 0 | 0 | 0 | 0 |
+| custom/mrope_random_027 | [[3, 8], [8, 3584], [8, 3584], [2048, 128]] | mrope3_half_default | 1070317775 | PASS | 0 | 0 | 0 | 0 | 0 |
+| custom/mrope_random_028 | [[4, 1], [1, 5120], [1, 5120], [2048, 128]] | mrope4_half_default | 1299025417 | PASS | 0 | 0 | 0 | 0 | 0 |
+| custom/mrope_random_029 | [[4, 8], [8, 4096], [8, 4096], [1024, 128]] | mrope4_half_default | 2098293120 | PASS | 0 | 0 | 0 | 0 | 0 |
+| custom/mrope_random_030 | [[3, 8], [8, 5120], [8, 5120], [256, 64]] | mrope3_half_interleave64 | 1607265919 | PASS | 0 | 0 | 0 | 0 | 0 |
+| custom/mrope_random_031 | [[3, 64], [64, 8192], [64, 8192], [512, 128]] | mrope3_interleaved_default | 1938822793 | PASS | 0 | 0 | 0 | 0 | 0 |
+| custom/mrope_random_032 | [[3, 64], [64, 4096], [64, 4096], [256, 128]] | mrope3_half_default | 272046855 | PASS | 0 | 0 | 0 | 0 | 0 |
+| custom/mrope_random_033 | [[4, 32], [32, 8192], [32, 8192], [1024, 128]] | mrope4_half_default | 1374793886 | PASS | 0 | 0 | 0 | 0 | 0 |
+| custom/mrope_random_034 | [[64], [64, 5120], [64, 5120], [2048, 128]] | rope_half_default | 277126696 | PASS | 0 | 0 | 0 | 0 | 0 |
+| custom/mrope_random_035 | [[3, 8], [8, 3584], [8, 3584], [512, 64]] | mrope3_half_interleave64 | 1472817882 | PASS | 0 | 0 | 0 | 0 | 0 |
+| custom/mrope_random_036 | [[3, 32], [32, 5120], [32, 5120], [1024, 128]] | mrope3_interleaved_default | 1533341534 | PASS | 0 | 0 | 0 | 0 | 0 |
+| custom/mrope_random_037 | [[3, 8], [8, 5120], [8, 5120], [2048, 128]] | mrope3_interleaved_default | 1236142190 | PASS | 0 | 0 | 0 | 0 | 0 |
+| custom/mrope_random_038 | [[3, 32], [32, 4096], [32, 4096], [512, 128]] | mrope3_half_default | 88831201 | PASS | 0 | 0 | 0 | 0 | 0 |
+| custom/mrope_random_039 | [[64], [64, 3584], [64, 3584], [256, 128]] | rope_half_default | 21920662 | PASS | 0 | 0 | 0 | 0 | 0 |
+| custom/mrope_random_040 | [[3, 1], [1, 4096], [1, 4096], [1024, 128]] | mrope3_interleaved_default | 1673357719 | PASS | 0 | 0 | 0 | 0 | 0 |

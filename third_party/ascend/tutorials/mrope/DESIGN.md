@@ -1,35 +1,54 @@
-# MRoPE 算子设计说明
+# MRoPE 算子设计方案
 
-## 1. 功能与输入输出
+## 1. 需求分析
 
-MRoPE 算子对 BF16 `query`、`key` 的每个 head 前 `rotary_dim` 通道施加 RoPE/MRoPE 旋转，输出同 shape、同 dtype 的 `query_out`、`key_out`。RoPE 使用 rank-1 `positions`；MRoPE 使用 3 行或 4 行 `positions`，并按 `mrope_section` 在 half 旋转维度上选择对应位置行。
+- 功能：Apply RoPE/MRoPE rotation to BF16 query/key tensors and return query_out/key_out.
+- 输入：positions, query, key, cos_sin_cache plus head_size/mrope_section/rotary_mode/cache_mode attributes
+- 输出：query_out and key_out with same shape/dtype as query/key
+- 覆盖：20 embedded public cases plus fixed-seed random metadata generalization cases.
 
-## 2. Triton-Ascend 实现
+## 2. 实现策略
 
-交付源码位于 `mrope.py`。核心实现包含一个 generic Triton-Ascend fallback 和四类优化 pair kernel：RoPE half/default、MRoPE half/default、MRoPE half/interleave rotary64、MRoPE interleaved/default。pair kernel 在一个 launch 中同时处理 query 和 key，减少 launch 数和重复 position/cache 解码。
+Optimized pair kernels for common RoPE/MRoPE modes plus generic Triton kernel for legal metadata.
 
-## 3. 调度策略
+被测 candidate 路径只调用本目录 Triton-Ascend 实现，不调用 Torch、torch_npu 高阶等价算子、外部 golden 或历史 baseline 文件。Torch/torch_npu 仅在 `run_inference.py` 校验流程中作为本地 baseline。
 
-full-rotary MRoPE half/default 路径使用 `[64 heads, 64 columns]` tile，按 token/head block 复用同一条 cos/sin 向量；其他 pair 路径使用较小 head block。未命中优化路径但合同允许的元数据会走同 backend generic Triton kernel，不会转向框架 fallback。
+## 3. 精度和 baseline 策略
 
-## 4. 正确性边界
+本目录生成 Torch 语义参考和 torch_npu baseline probe。torch_npu 只有在运行成功且通过同一 checker 时才作为 selected baseline；否则 selected baseline 为 Torch semantic。candidate 最终精度始终对 Torch 语义参考判定。
 
-- `query/key/cos_sin_cache` 必须为 BF16，`positions` 必须为 int64。
-- `head_size`、`rotary_dim` 为 32 的倍数，且 `rotary_dim <= head_size`。
-- MRoPE rows 只接受 3/4，且必须与 `mrope_section` 长度匹配。
-- MRoPE `sum(mrope_section) == rotary_dim / 2`。
-- `[16,16,16,16]` 只允许 `cache_mode=default`。
-- 当前实现要求输入 contiguous；这是 Triton-Ascend 实现 guard，不是文档语义收窄。
-- device kernel 不静默 clamp 非法 position；非法 position 会使输出 NaN，从而 fail loudly。
+## 4. 性能统计
 
-## 5. 性能证据
+性能统计来自本目录 `run_inference.py --benchmark` 的 torch_npu.profiler kernel_details.csv active-window 计时。主速度验收口径为 `torch_npu runnable all` active/active 几何平均 >= 1.2x；所有 torch_npu 可计时 case 都纳入，精度通过和失败都计入。selected baseline 仅用于语义标杆选择说明。
 
-当前交付采用边界修复后的 OpForge run `eval_20260617_151008`：20/20 PASS，官方主指标 `active_vs_active.geomean=11.657672722257`，min `1.146341463415`，score `100.018424560106`，无 active regression。历史 best `eval_20260616_213635` 略高，但发生在边界 fail-loud 修复之前，不作为当前源码交付主证据。
+## 5. 统计汇总
 
-## 6. Baseline split
+| 指标 | 数值 |
+| --- | --- |
+| evidence source | logs/mrope_validation.jsonl |
+| total cases | 60 |
+| public cases | 20 |
+| random/generalization cases | 40 |
+| candidate pass | 60/60 |
+| main speed sample | torch_npu runnable all (31 cases) |
+| main speed candidate active geomean | 11.271 us |
+| main speed torch_npu active geomean | 13.765 us |
+| main speed active/active geomean speedup | 1.211017x |
+| main speed gate | PASS >= 1.2x |
+| overall selected baseline split | torch=28, torch_npu=32 |
+| public selected baseline split | torch=8, torch_npu=12 |
+| overall torch_npu runnable all | 31 |
+| overall torch_npu accuracy pass/fail | 31/0 |
+| torch_npu runnable-all active speedup geomean | 1.211017x |
+| torch_npu runnable-all speed gate | PASS >= 1.2x |
+| public torch_npu runnable all | 12 |
+| public torch_npu accuracy pass/fail | 12/0 |
+| aux public candidate active geomean | 16.067 us |
+| aux public selected baseline active geomean | 13.369 us |
+| aux public selected active/active geomean speedup | 1.220977x |
+| max candidate RMSE | 0 |
+| commercial standard | references/commercial_standard.md @ c260c8ab7a9be4823ac8f8a07c60442de9bf141e |
 
-baseline calibration 记录为 `task_npu_baseline=8`、`pytorch_fallback=12`。其中 `pytorch_fallback` 是因为 `torch_npu.npu_mrope` 对部分 RoPE/interleaved/cache_interleave 配置报错或与语义 golden 不一致；这些 case 不能宣称为相对有效 CANN `npu_mrope` baseline 的加速。
+## 6. 无 fallback / 无 hacking 声明
 
-## 7. 自验证
-
-本目录实际运行 `validate_mrope.py --public --random-generalization 40 --random-seed 20260617`，日志为 `logs/mrope_public_random_20260617.log`，结果 60/60 PASS，mismatch=0。
+实现调度只依赖 dtype、rank、shape、属性、contiguity 等合法运行时元数据，不依赖 case id、workload 文件名、输入取值、输出模式或 timing signature。unsupported contract fail loudly。

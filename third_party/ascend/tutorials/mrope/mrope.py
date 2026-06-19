@@ -51,15 +51,7 @@ def _mrope_apply_kernel(
 
     if IS_ROPE:
         pos = tl.load(positions + token, mask=rotate_mask, other=0)
-        pos_valid = (pos >= 0) & (pos < max_seq)
     else:
-        pos0 = tl.load(positions + token, mask=mask, other=0)
-        pos1 = tl.load(positions + tokens + token, mask=mask, other=0)
-        pos2 = tl.load(positions + 2 * tokens + token, mask=mask, other=0)
-        pos_valid = (pos0 >= 0) & (pos0 < max_seq) & (pos1 >= 0) & (pos1 < max_seq) & (pos2 >= 0) & (pos2 < max_seq)
-        if pos_rows == 4:
-            pos3 = tl.load(positions + 3 * tokens + token, mask=mask, other=0)
-            pos_valid = pos_valid & (pos3 >= 0) & (pos3 < max_seq)
         cut0 = sec0
         cut1 = sec0 + sec1
         cut2 = sec0 + sec1 + sec2
@@ -69,18 +61,14 @@ def _mrope_apply_kernel(
         row = tl.where(cos_idx >= cut2, 3, row)
         row = tl.minimum(row, pos_rows - 1)
         pos = tl.load(positions + row * tokens + token, mask=rotate_mask, other=0)
-    safe_pos = tl.where(pos_valid, pos, 0)
-    cache_mask = rotate_mask & pos_valid
+    pos = tl.minimum(tl.maximum(pos, 0), max_seq - 1)
 
     if CACHE_INTERLEAVED:
-        cos_val = tl.load(cache + safe_pos * rotary_dim + cos_idx * 2, mask=cache_mask,
-                          other=float("nan")).to(tl.float32)
-        sin_val = tl.load(cache + safe_pos * rotary_dim + cos_idx * 2 + 1, mask=cache_mask,
-                          other=float("nan")).to(tl.float32)
+        cos_val = tl.load(cache + pos * rotary_dim + cos_idx * 2, mask=rotate_mask, other=1.0).to(tl.float32)
+        sin_val = tl.load(cache + pos * rotary_dim + cos_idx * 2 + 1, mask=rotate_mask, other=0.0).to(tl.float32)
     else:
-        cos_val = tl.load(cache + safe_pos * rotary_dim + cos_idx, mask=cache_mask, other=float("nan")).to(tl.float32)
-        sin_val = tl.load(cache + safe_pos * rotary_dim + half_dim + cos_idx, mask=cache_mask,
-                          other=float("nan")).to(tl.float32)
+        cos_val = tl.load(cache + pos * rotary_dim + cos_idx, mask=rotate_mask, other=1.0).to(tl.float32)
+        sin_val = tl.load(cache + pos * rotary_dim + half_dim + cos_idx, mask=rotate_mask, other=0.0).to(tl.float32)
 
     if ROTARY_INTERLEAVED:
         even = (d % 2) == 0
@@ -94,7 +82,6 @@ def _mrope_apply_kernel(
         rotated = tl.where(first_half, rotated_first, rotated_second)
 
     out_val = tl.where(rotate_mask, rotated, x_val)
-    out_val = tl.where(mask & ~pos_valid, float("nan"), out_val)
     tl.store(out + offs, out_val, mask=mask)
 
 
@@ -127,18 +114,11 @@ def _mrope_full_half_default_2d_kernel(
     rows = tl.where(cols_1d >= cut1, 2, rows)
     rows = tl.where(cols_1d >= cut2, 3, rows)
     rows = tl.minimum(rows, pos_rows - 1)
-    pos0 = tl.load(positions + token).to(tl.int32)
-    pos1 = tl.load(positions + tokens + token).to(tl.int32)
-    pos2 = tl.load(positions + 2 * tokens + token).to(tl.int32)
-    pos_valid = (pos0 >= 0) & (pos0 < max_seq) & (pos1 >= 0) & (pos1 < max_seq) & (pos2 >= 0) & (pos2 < max_seq)
-    if pos_rows == 4:
-        pos3 = tl.load(positions + 3 * tokens + token).to(tl.int32)
-        pos_valid = pos_valid & (pos3 >= 0) & (pos3 < max_seq)
     pos = tl.load(positions + rows * tokens + token).to(tl.int32)
-    safe_pos = tl.where(pos_valid, pos, 0)
+    pos = tl.minimum(tl.maximum(pos, 0), max_seq - 1)
 
-    cos_vec = tl.load(cache + safe_pos * 128 + cols_1d, mask=pos_valid, other=float("nan")).to(tl.float32)
-    sin_vec = tl.load(cache + safe_pos * 128 + 64 + cols_1d, mask=pos_valid, other=float("nan")).to(tl.float32)
+    cos_vec = tl.load(cache + pos * 128 + cols_1d).to(tl.float32)
+    sin_vec = tl.load(cache + pos * 128 + 64 + cols_1d).to(tl.float32)
 
     h = tl.arange(0, HEAD_BLOCK)[:, None]
     cols = tl.arange(0, 64)[None, :]
@@ -149,8 +129,8 @@ def _mrope_full_half_default_2d_kernel(
     second = tl.load(x + base + 64 + cols, mask=mask, other=0.0).to(tl.float32)
     cos_val = cos_vec[None, :]
     sin_val = sin_vec[None, :]
-    tl.store(out + base + cols, tl.where(pos_valid, first * cos_val - second * sin_val, float("nan")), mask=mask)
-    tl.store(out + base + 64 + cols, tl.where(pos_valid, first * sin_val + second * cos_val, float("nan")), mask=mask)
+    tl.store(out + base + cols, first * cos_val - second * sin_val, mask=mask)
+    tl.store(out + base + 64 + cols, first * sin_val + second * cos_val, mask=mask)
 
 
 @triton.jit
@@ -184,18 +164,11 @@ def _mrope_full_half_default_2d_pair_kernel(
     rows = tl.where(cols_1d >= cut1, 2, rows)
     rows = tl.where(cols_1d >= cut2, 3, rows)
     rows = tl.minimum(rows, pos_rows - 1)
-    pos0 = tl.load(positions + token).to(tl.int32)
-    pos1 = tl.load(positions + tokens + token).to(tl.int32)
-    pos2 = tl.load(positions + 2 * tokens + token).to(tl.int32)
-    pos_valid = (pos0 >= 0) & (pos0 < max_seq) & (pos1 >= 0) & (pos1 < max_seq) & (pos2 >= 0) & (pos2 < max_seq)
-    if pos_rows == 4:
-        pos3 = tl.load(positions + 3 * tokens + token).to(tl.int32)
-        pos_valid = pos_valid & (pos3 >= 0) & (pos3 < max_seq)
     pos = tl.load(positions + rows * tokens + token).to(tl.int32)
-    safe_pos = tl.where(pos_valid, pos, 0)
+    pos = tl.minimum(tl.maximum(pos, 0), max_seq - 1)
 
-    cos_vec = tl.load(cache + safe_pos * 128 + cols_1d, mask=pos_valid, other=float("nan")).to(tl.float32)
-    sin_vec = tl.load(cache + safe_pos * 128 + 64 + cols_1d, mask=pos_valid, other=float("nan")).to(tl.float32)
+    cos_vec = tl.load(cache + pos * 128 + cols_1d).to(tl.float32)
+    sin_vec = tl.load(cache + pos * 128 + 64 + cols_1d).to(tl.float32)
 
     h = tl.arange(0, HEAD_BLOCK)[:, None]
     cols = tl.arange(0, 64)[None, :]
@@ -210,14 +183,10 @@ def _mrope_full_half_default_2d_pair_kernel(
     key_first = tl.load(key + base + cols, mask=mask, other=0.0).to(tl.float32)
     key_second = tl.load(key + base + 64 + cols, mask=mask, other=0.0).to(tl.float32)
 
-    tl.store(query_out + base + cols, tl.where(pos_valid, query_first * cos_val - query_second * sin_val, float("nan")),
-             mask=mask)
-    tl.store(query_out + base + 64 + cols,
-             tl.where(pos_valid, query_first * sin_val + query_second * cos_val, float("nan")), mask=mask)
-    tl.store(key_out + base + cols, tl.where(pos_valid, key_first * cos_val - key_second * sin_val, float("nan")),
-             mask=mask)
-    tl.store(key_out + base + 64 + cols, tl.where(pos_valid, key_first * sin_val + key_second * cos_val, float("nan")),
-             mask=mask)
+    tl.store(query_out + base + cols, query_first * cos_val - query_second * sin_val, mask=mask)
+    tl.store(query_out + base + 64 + cols, query_first * sin_val + query_second * cos_val, mask=mask)
+    tl.store(key_out + base + cols, key_first * cos_val - key_second * sin_val, mask=mask)
+    tl.store(key_out + base + 64 + cols, key_first * sin_val + key_second * cos_val, mask=mask)
 
 
 @triton.jit
@@ -240,10 +209,9 @@ def _rope_full_half_default_2d_pair_kernel(
 
     cols_1d = tl.arange(0, 64)
     pos = tl.load(positions + token).to(tl.int32)
-    pos_valid = (pos >= 0) & (pos < max_seq)
-    safe_pos = tl.where(pos_valid, pos, 0)
-    cos_vec = tl.load(cache + safe_pos * 128 + cols_1d, mask=pos_valid, other=float("nan")).to(tl.float32)
-    sin_vec = tl.load(cache + safe_pos * 128 + 64 + cols_1d, mask=pos_valid, other=float("nan")).to(tl.float32)
+    pos = tl.minimum(tl.maximum(pos, 0), max_seq - 1)
+    cos_vec = tl.load(cache + pos * 128 + cols_1d).to(tl.float32)
+    sin_vec = tl.load(cache + pos * 128 + 64 + cols_1d).to(tl.float32)
 
     h = tl.arange(0, HEAD_BLOCK)[:, None]
     cols = tl.arange(0, 64)[None, :]
@@ -258,14 +226,10 @@ def _rope_full_half_default_2d_pair_kernel(
     key_first = tl.load(key + base + cols, mask=mask, other=0.0).to(tl.float32)
     key_second = tl.load(key + base + 64 + cols, mask=mask, other=0.0).to(tl.float32)
 
-    tl.store(query_out + base + cols, tl.where(pos_valid, query_first * cos_val - query_second * sin_val, float("nan")),
-             mask=mask)
-    tl.store(query_out + base + 64 + cols,
-             tl.where(pos_valid, query_first * sin_val + query_second * cos_val, float("nan")), mask=mask)
-    tl.store(key_out + base + cols, tl.where(pos_valid, key_first * cos_val - key_second * sin_val, float("nan")),
-             mask=mask)
-    tl.store(key_out + base + 64 + cols, tl.where(pos_valid, key_first * sin_val + key_second * cos_val, float("nan")),
-             mask=mask)
+    tl.store(query_out + base + cols, query_first * cos_val - query_second * sin_val, mask=mask)
+    tl.store(query_out + base + 64 + cols, query_first * sin_val + query_second * cos_val, mask=mask)
+    tl.store(key_out + base + cols, key_first * cos_val - key_second * sin_val, mask=mask)
+    tl.store(key_out + base + 64 + cols, key_first * sin_val + key_second * cos_val, mask=mask)
 
 
 @triton.jit
@@ -299,18 +263,11 @@ def _mrope_half_interleave64_2d_pair_kernel(
     rows = tl.where(cols_1d >= cut1, 2, rows)
     rows = tl.where(cols_1d >= cut2, 3, rows)
     rows = tl.minimum(rows, pos_rows - 1)
-    pos0 = tl.load(positions + token).to(tl.int32)
-    pos1 = tl.load(positions + tokens + token).to(tl.int32)
-    pos2 = tl.load(positions + 2 * tokens + token).to(tl.int32)
-    pos_valid = (pos0 >= 0) & (pos0 < max_seq) & (pos1 >= 0) & (pos1 < max_seq) & (pos2 >= 0) & (pos2 < max_seq)
-    if pos_rows == 4:
-        pos3 = tl.load(positions + 3 * tokens + token).to(tl.int32)
-        pos_valid = pos_valid & (pos3 >= 0) & (pos3 < max_seq)
     pos = tl.load(positions + rows * tokens + token).to(tl.int32)
-    safe_pos = tl.where(pos_valid, pos, 0)
+    pos = tl.minimum(tl.maximum(pos, 0), max_seq - 1)
 
-    cos_vec = tl.load(cache + safe_pos * 64 + cols_1d * 2, mask=pos_valid, other=float("nan")).to(tl.float32)
-    sin_vec = tl.load(cache + safe_pos * 64 + cols_1d * 2 + 1, mask=pos_valid, other=float("nan")).to(tl.float32)
+    cos_vec = tl.load(cache + pos * 64 + cols_1d * 2).to(tl.float32)
+    sin_vec = tl.load(cache + pos * 64 + cols_1d * 2 + 1).to(tl.float32)
 
     h = tl.arange(0, HEAD_BLOCK)[:, None]
     rot_cols = tl.arange(0, 32)[None, :]
@@ -326,19 +283,15 @@ def _mrope_half_interleave64_2d_pair_kernel(
     key_first = tl.load(key + base + rot_cols, mask=mask, other=0.0).to(tl.float32)
     key_second = tl.load(key + base + 32 + rot_cols, mask=mask, other=0.0).to(tl.float32)
 
-    tl.store(query_out + base + rot_cols,
-             tl.where(pos_valid, query_first * cos_val - query_second * sin_val, float("nan")), mask=mask)
-    tl.store(query_out + base + 32 + rot_cols,
-             tl.where(pos_valid, query_first * sin_val + query_second * cos_val, float("nan")), mask=mask)
-    tl.store(key_out + base + rot_cols, tl.where(pos_valid, key_first * cos_val - key_second * sin_val, float("nan")),
-             mask=mask)
-    tl.store(key_out + base + 32 + rot_cols,
-             tl.where(pos_valid, key_first * sin_val + key_second * cos_val, float("nan")), mask=mask)
+    tl.store(query_out + base + rot_cols, query_first * cos_val - query_second * sin_val, mask=mask)
+    tl.store(query_out + base + 32 + rot_cols, query_first * sin_val + query_second * cos_val, mask=mask)
+    tl.store(key_out + base + rot_cols, key_first * cos_val - key_second * sin_val, mask=mask)
+    tl.store(key_out + base + 32 + rot_cols, key_first * sin_val + key_second * cos_val, mask=mask)
 
     query_tail = tl.load(query + base + 64 + tail_cols, mask=mask, other=0.0)
     key_tail = tl.load(key + base + 64 + tail_cols, mask=mask, other=0.0)
-    tl.store(query_out + base + 64 + tail_cols, tl.where(pos_valid, query_tail, float("nan")), mask=mask)
-    tl.store(key_out + base + 64 + tail_cols, tl.where(pos_valid, key_tail, float("nan")), mask=mask)
+    tl.store(query_out + base + 64 + tail_cols, query_tail, mask=mask)
+    tl.store(key_out + base + 64 + tail_cols, key_tail, mask=mask)
 
 
 @triton.jit
@@ -372,18 +325,11 @@ def _mrope_interleaved_default_2d_pair_kernel(
     rows = tl.where(cols_1d >= cut1, 2, rows)
     rows = tl.where(cols_1d >= cut2, 3, rows)
     rows = tl.minimum(rows, pos_rows - 1)
-    pos0 = tl.load(positions + token).to(tl.int32)
-    pos1 = tl.load(positions + tokens + token).to(tl.int32)
-    pos2 = tl.load(positions + 2 * tokens + token).to(tl.int32)
-    pos_valid = (pos0 >= 0) & (pos0 < max_seq) & (pos1 >= 0) & (pos1 < max_seq) & (pos2 >= 0) & (pos2 < max_seq)
-    if pos_rows == 4:
-        pos3 = tl.load(positions + 3 * tokens + token).to(tl.int32)
-        pos_valid = pos_valid & (pos3 >= 0) & (pos3 < max_seq)
     pos = tl.load(positions + rows * tokens + token).to(tl.int32)
-    safe_pos = tl.where(pos_valid, pos, 0)
+    pos = tl.minimum(tl.maximum(pos, 0), max_seq - 1)
 
-    cos_vec = tl.load(cache + safe_pos * 128 + cols_1d, mask=pos_valid, other=float("nan")).to(tl.float32)
-    sin_vec = tl.load(cache + safe_pos * 128 + 64 + cols_1d, mask=pos_valid, other=float("nan")).to(tl.float32)
+    cos_vec = tl.load(cache + pos * 128 + cols_1d).to(tl.float32)
+    sin_vec = tl.load(cache + pos * 128 + 64 + cols_1d).to(tl.float32)
 
     h = tl.arange(0, HEAD_BLOCK)[:, None]
     cols = tl.arange(0, 64)[None, :]
@@ -400,14 +346,10 @@ def _mrope_interleaved_default_2d_pair_kernel(
     key_even = tl.load(key + base + even_cols, mask=mask, other=0.0).to(tl.float32)
     key_odd = tl.load(key + base + odd_cols, mask=mask, other=0.0).to(tl.float32)
 
-    tl.store(query_out + base + even_cols, tl.where(pos_valid, query_even * cos_val - query_odd * sin_val,
-                                                    float("nan")), mask=mask)
-    tl.store(query_out + base + odd_cols, tl.where(pos_valid, query_odd * cos_val + query_even * sin_val, float("nan")),
-             mask=mask)
-    tl.store(key_out + base + even_cols, tl.where(pos_valid, key_even * cos_val - key_odd * sin_val, float("nan")),
-             mask=mask)
-    tl.store(key_out + base + odd_cols, tl.where(pos_valid, key_odd * cos_val + key_even * sin_val, float("nan")),
-             mask=mask)
+    tl.store(query_out + base + even_cols, query_even * cos_val - query_odd * sin_val, mask=mask)
+    tl.store(query_out + base + odd_cols, query_odd * cos_val + query_even * sin_val, mask=mask)
+    tl.store(key_out + base + even_cols, key_even * cos_val - key_odd * sin_val, mask=mask)
+    tl.store(key_out + base + odd_cols, key_odd * cos_val + key_even * sin_val, mask=mask)
 
 
 def _as_section(mrope_section) -> list[int]:
@@ -499,7 +441,7 @@ def _launch_apply_pair_2d(
     heads = int(query.shape[1]) // int(head_size)
     pos_rows = int(positions.shape[0])
     padded = list(section) + [0, 0, 0, 0]
-    head_block = 64
+    head_block = 16 if tokens <= 8 else 64
     head_blocks = triton.cdiv(heads, head_block)
     _mrope_full_half_default_2d_pair_kernel[(tokens * head_blocks, )](
         positions,

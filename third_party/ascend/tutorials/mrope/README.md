@@ -1,50 +1,50 @@
-# MRoPE Triton-Ascend
+# MRoPE Triton-Ascend Tutorial
 
-本目录存放 MRoPE 算子的 Triton-Ascend 交付材料，按 `/mnt/model/lcw/SLAI-Ascend-OpForge/docs/mrope.md` 和当前 OpForge/CANN-Bench 证据整理。
+## 说明
 
-## 需求概述
+本目录是自包含交付目录。baseline、精度校验、性能统计和报告生成都由本目录脚本完成；不读取外部历史评测 CSV/JSON，也不保留历史对照文件。
 
-- 后端：Ascend NPU 上的 Triton-Ascend。
-- 算子：`mrope`，输出 `query_out`、`key_out`。
-- 输入：`positions:int64`，`query/key/cos_sin_cache:bfloat16`。
-- Shape：RoPE positions `[num_tokens]`，MRoPE positions `[3,num_tokens]` 或 `[4,num_tokens]`；`query/key=[num_tokens, num_heads * head_size]`；`cos_sin_cache=[max_seq_len, rotary_dim]`。
-- 模式：`rotary_mode=half/interleaved`，`cache_mode=default/interleave`。
+## 复现命令
 
-## 文件说明
-
-- `mrope.py`：Triton-Ascend kernel 及 Python 调用封装。
-- `validate_mrope.py`：public shape 和固定 seed random generalization 自验证脚本。
-- `DESIGN.md`：算子设计说明。
-- `SELF_VALIDATION_REPORT.md`：自验证报告、public 性能明细和随机泛化明细。
-- `Mrope算子设计方案.docx`：按模板生成的设计方案。
-- `Mrope算子自验证报告.xlsx`：按模板生成的自验证报告，含逐 case 速度、随机泛化、日志证据工作表。
-- `OPFORGE_EVIDENCE.json`：结构化证据副本。
-- `logs/mrope_public_random_20260617.log`：本目录实际运行的 public+random 自验证日志。
-
-## 运行验证
+前提：当前 Python 环境已安装 torch/torch_npu，并可导入包含 `triton._C` 编译扩展的 Triton-Ascend；`run_inference.py` 会优先使用本仓库的 `python/triton`。
 
 ```bash
-python3 validate_mrope.py --public --random-generalization 40 --random-seed 20260617 \
-  --jsonl logs/mrope_public_random_$(date +%Y%m%d_%H%M%S).jsonl \
-  --summary-json logs/mrope_public_random_$(date +%Y%m%d_%H%M%S).summary.json
+export NPU_ID=0 && export ASCEND_RT_VISIBLE_DEVICES=$NPU_ID && export ASCEND_VISIBLE_DEVICES=$NPU_ID && source /mnt/model/lcw/.local/Ascend-9.0.0/cann-9.0.0/set_env.sh && python run_inference.py --public --random-generalization 40 --random-seed 20260617 --benchmark --warmup 1 --repeat 3 --jsonl logs/mrope_validation.jsonl --summary-json logs/mrope_validation.summary.json
+UV_PROJECT_ENVIRONMENT=/tmp/uv-triton-ascend-delivery uv run --no-project --with openpyxl --with python-docx python generate_delivery.py
 ```
 
 ## 当前证据
 
 | 指标 | 数值 |
 | --- | --- |
-| OpForge run id | `eval_20260617_151008` |
-| OpForge 状态 | `PASSED` |
-| public 正确性 | 20/20 PASS |
-| active/active geomean | 11.657673x |
-| active/active min | 1.146341x |
-| kernel/kernel geomean | 4.997362x |
-| baseline source split | task_npu_baseline=8, pytorch_fallback=12 |
-| OpForge generalization audit | 40/40 PASS |
-| delivery validation | 60/60 PASS; public=20, random=40 |
+| evidence source | logs/mrope_validation.jsonl |
+| total cases | 60 |
+| public cases | 20 |
+| random/generalization cases | 40 |
+| candidate pass | 60/60 |
+| main speed sample | torch_npu runnable all (31 cases) |
+| main speed candidate active geomean | 11.271 us |
+| main speed torch_npu active geomean | 13.765 us |
+| main speed active/active geomean speedup | 1.211017x |
+| main speed gate | PASS >= 1.2x |
+| overall selected baseline split | torch=28, torch_npu=32 |
+| public selected baseline split | torch=8, torch_npu=12 |
+| overall torch_npu runnable all | 31 |
+| overall torch_npu accuracy pass/fail | 31/0 |
+| torch_npu runnable-all active speedup geomean | 1.211017x |
+| torch_npu runnable-all speed gate | PASS >= 1.2x |
+| public torch_npu runnable all | 12 |
+| public torch_npu accuracy pass/fail | 12/0 |
+| aux public candidate active geomean | 16.067 us |
+| aux public selected baseline active geomean | 13.369 us |
+| aux public selected active/active geomean speedup | 1.220977x |
+| max candidate RMSE | 0 |
+| commercial standard | references/commercial_standard.md @ c260c8ab7a9be4823ac8f8a07c60442de9bf141e |
 
-注意：当前 20 个 case 中只有 8 个为有效 `task_npu_baseline`，12 个为 `pytorch_fallback`。不能将全部 20 个 case 表述为相对有效 CANN `npu_mrope` baseline 的加速。
+## 文件
 
-## 实现边界
-
-实现根据运行时 dtype/rank/shape/contiguity、`head_size`、`rotary_dim`、positions rank/rows、`mrope_section`、`rotary_mode`、`cache_mode` 选择 Triton-Ascend 路径；不按 case id、workload 文件名、公开输入值、观测输出或计时特征分支。被测路径不调用 PyTorch 等价计算、`torch_npu.npu_mrope`、CANN/vendor whole-op、CPU fallback、任务 golden 或 peer 解法。
+- `mrope.py`: Triton-Ascend candidate 实现
+- `run_inference.py`: 统一推理入口
+- `validate_mrope.py`: 本地 Torch / torch_npu / candidate baseline 与 checker
+- `generate_delivery.py`: 从本目录 logs 重新生成 README/DESIGN/验收报告/DOCX/XLSX
+- `references/commercial_standard.md`: 商业精度标准本地副本
