@@ -106,3 +106,9 @@ dist/
 *.egg-info/
 .eggs/
 docs/zh/python-api/generated/
+
+# Local tutorial validation artifacts
+/uv.lock
+third_party/ascend/tutorials/*/logs/profiler_raw/
+third_party/ascend/tutorials/*/logs/*.opforge_timing.rerun.log
+third_party/ascend/tutorials/*/extra-info/
